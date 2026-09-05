@@ -10,7 +10,7 @@ let nextId = 1;
  * Surface behaviour comes from the material.
  */
 export class Shape {
-  constructor({ type = 'solid', nodes = [], data = {} } = {}) {
+  constructor({ type = 'solid', nodes = [], data = {}, channel = null, move = null } = {}) {
     const def = typeof type === 'string' ? Materials[type] : type;
     if (!def) throw new Error(`Unknown material: ${type}`);
     this.id = nextId++;
@@ -22,6 +22,11 @@ export class Shape {
     this.hazard = !!def.hazard;
     this.draw = def.draw || null;
     this.nodes = nodes.map((n) => ({ x: n.x, y: n.y, cx: n.cx ?? null, cy: n.cy ?? null }));
+    /** Switch channel that drives this shape, and how far it travels when powered. */
+    this.channel = channel;
+    this.move = move ? { dx: move.dx ?? 0, dy: move.dy ?? 0, duration: move.duration ?? 0.5 } : null;
+    this.offset = 0;                 // 0 = resting, 1 = fully moved
+    this.baseNodes = this.nodes.map((n) => ({ ...n }));
     this.data = data;
     this.points = [];
     this.edges = [];
@@ -36,6 +41,28 @@ export class Shape {
       type: def.name, color: def.color, friction: def.friction, bounce: def.bounce,
       oneWay: !!def.oneWay, hazard: !!def.hazard, draw: def.draw || null,
     });
+  }
+
+  get isDoor() { return !!(this.channel && this.move); }
+
+  /** Snapshot the current nodes as the resting pose a `move` is measured from. */
+  syncBase() {
+    this.baseNodes = this.nodes.map((n) => ({ ...n }));
+    return this;
+  }
+
+  /** Place the shape `t` (0..1) of the way along its `move`. Returns true if it changed. */
+  setOffset(t) {
+    if (!this.move || Math.abs(t - this.offset) < 1e-4) return false;
+    this.offset = t;
+    const { dx, dy } = this.move;
+    this.nodes.forEach((n, i) => {
+      const b = this.baseNodes[i];
+      n.x = b.x + dx * t; n.y = b.y + dy * t;
+      if (b.cx != null) { n.cx = b.cx + dx * t; n.cy = b.cy + dy * t; }
+    });
+    this.rebuild();
+    return true;
   }
 
   /** Recompute the flattened polygon, bounds and edge list from `nodes`. */
@@ -67,16 +94,20 @@ export class Shape {
       n.x += dx; n.y += dy;
       if (n.cx != null) { n.cx += dx; n.cy += dy; }
     }
-    return this.rebuild();
+    this.rebuild();
+    return this.syncBase();
   }
 
   clone() { return new Shape(this.toJSON()); }
 
   toJSON() {
-    return {
+    const out = {
       type: this.type,
-      nodes: this.nodes.map((n) => (n.cx != null ? { x: n.x, y: n.y, cx: n.cx, cy: n.cy } : { x: n.x, y: n.y })),
+      nodes: this.baseNodes.map((n) => (n.cx != null ? { x: n.x, y: n.y, cx: n.cx, cy: n.cy } : { x: n.x, y: n.y })),
     };
+    if (this.channel) out.channel = this.channel;
+    if (this.move) out.move = { ...this.move };
+    return out;
   }
 
   static rect(x, y, w, h, type = 'solid') {

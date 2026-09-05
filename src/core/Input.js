@@ -9,6 +9,7 @@ export const DEFAULT_BINDINGS = {
   up:    ['ArrowUp', 'KeyW'],
   down:  ['ArrowDown', 'KeyS'],
   jump:  ['Space', 'KeyZ', 'KeyK', 'ArrowUp', 'KeyW'],
+  grab:  ['KeyX'],
   reset: ['KeyR'],
   debug: ['Backquote', 'F3'],
 };

@@ -71,6 +71,65 @@ export class Renderer {
     }
   }
 
+  /** Pressure plates: a plate standing on the ground that squashes flat when pressed. */
+  drawSwitches(ctx, switches, rect) {
+    const base = 3;
+    for (const s of switches) {
+      const r = s.rect;
+      if (!aabbOverlap(r, rect)) continue;
+      const h = base + (s.h - base) * (1 - s.press);   // compresses onto its base, never past it
+
+      // socket lip, flush with the ground line
+      ctx.fillStyle = this.cfg.outlineColor;
+      ctx.beginPath();
+      ctx.roundRect(r.x - 3, s.y - base, r.w + 6, base, 1.5);
+      ctx.fill();
+
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.roundRect(r.x, s.y - h, r.w, h, Math.min(3, h / 2));
+      ctx.fill();
+      ctx.lineWidth = this.cfg.outlineWidth;
+      ctx.strokeStyle = this.cfg.outlineColor;
+      ctx.stroke();
+
+      // one-time plates carry an inset line so you can tell them apart before pressing
+      if (s.latch && h > 6) {
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(r.x + 5, s.y - h + 3, r.w - 10, h - 6, 1);
+        ctx.stroke();
+      }
+    }
+  }
+
+  /**
+   * Clear tubes. `drawInside` is invoked between the tube's glass and its rim so whatever is
+   * being transported is drawn within the tube walls.
+   */
+  drawTubes(ctx, tubes, rect, drawInside) {
+    for (const t of tubes) {
+      if (!t.usable || !aabbOverlap(t, rect)) continue;
+      const path = new Path2D();
+      path.moveTo(t.points[0].x, t.points[0].y);
+      for (let i = 1; i < t.points.length; i++) path.lineTo(t.points[i].x, t.points[i].y);
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'round';
+
+      // solid walls, then a clear bore punched back through them
+      ctx.strokeStyle = this.cfg.tubeWall;
+      ctx.lineWidth = (t.radius + t.wall) * 2;
+      ctx.stroke(path);
+      ctx.strokeStyle = this.cfg.background;
+      ctx.lineWidth = t.radius * 2;
+      ctx.stroke(path);
+      ctx.strokeStyle = this.cfg.tubeGlass;
+      ctx.stroke(path);
+
+      drawInside?.(t);
+    }
+  }
+
   /** Stroke the flattened edges whose outward normal points up. */
   _strokeTopEdges(ctx, s, color, width) {
     ctx.strokeStyle = color;

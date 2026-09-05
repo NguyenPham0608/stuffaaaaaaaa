@@ -56,6 +56,8 @@ body { display: flex; flex-direction: column; }
 .row input[type=number] { width: 58px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 3px 5px; font: inherit; }
 .row input[type=text] { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 3px 5px; font: inherit; }
 .row input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+.row select { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 3px 4px; font: inherit; }
+.row[hidden] { display: none; }
 
 button.action {
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px;

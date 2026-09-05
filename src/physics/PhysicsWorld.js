@@ -32,6 +32,14 @@ export class PhysicsWorld {
   }
   clear() { this.shapes.length = 0; this.hash.clear(); }
 
+  /** Re-index a shape whose geometry `mutate` is about to change. */
+  updateShape(shape, mutate) {
+    this.hash.remove(shape);
+    const changed = mutate();
+    this.hash.insert(shape);
+    return changed;
+  }
+
   step(body, dt) {
     const p = this.cfg;
     body.prevPos.copy(body.pos);

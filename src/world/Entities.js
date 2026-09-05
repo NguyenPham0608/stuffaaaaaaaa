@@ -33,11 +33,12 @@ export function createStaticBodies(shapes) {
   for (const s of shapes) {
     if (s.points.length < 3) continue;
     const common = { isStatic: true, friction: Math.min(1, s.friction) * 0.6, restitution: (s.bounce || 0) * 0.9, color: s.color };
-    bodies.push(new RigidBody({ ...common, shape: 'terrain', terrain: s, kind: 'terrain' }));
+    const made = [new RigidBody({ ...common, shape: 'terrain', terrain: s, kind: 'terrain' })];
     for (const piece of decomposeConvex(s.points)) {
       if (piece.length < 3) continue;
-      bodies.push(new RigidBody({ ...common, shape: 'poly', verts: piece, kind: 'wall', terrainPiece: true }));
+      made.push(new RigidBody({ ...common, shape: 'poly', verts: piece, kind: 'wall', terrainPiece: true }));
     }
+    for (const b of made) { b.source = s; bodies.push(b); }
   }
   return bodies;
 }

@@ -27,7 +27,7 @@ function pickPlayLevel() {
 
 const MODES = {
   play: {
-    help: '← → move · Space/Z jump · ↓+jump drop through · R reset · ` debug',
+    help: '← → move · Space/Z jump · X carry · ↓+jump drop through · R reset · ` debug',
     start() {
       const engine = new Engine(canvas, CONFIG.physics);
       const input = new Input(window);

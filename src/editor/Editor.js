@@ -8,6 +8,8 @@ import { GameScene } from '../scenes/GameScene.js';
 import { Renderer } from '../render/Renderer.js';
 import { Camera } from '../render/Camera.js';
 import { ENTITY_DEFS, drawEntityPreview, drawSpawn } from '../world/Entities.js';
+import { Switch, SWITCH_ACCEPTS } from '../world/Switch.js';
+import { Tube } from '../world/Tube.js';
 import { quadPoint, pointInPolygon } from '../math/Geometry.js';
 
 const STORAGE_KEY = 'ballplatformer.editor.v2';
@@ -21,6 +23,8 @@ export const OBJECT_TOOLS = [
   { type: 'crate', label: 'Crate', color: ENTITY_DEFS.crate.color, key: '7' },
   { type: 'heavy', label: 'Heavy', color: ENTITY_DEFS.heavy.color, key: '8' },
   { type: 'ball',  label: 'Ball',  color: ENTITY_DEFS.ball.color,  key: '9' },
+  { type: 'switch', label: 'Switch', color: '#ffffff', key: 'e' },
+  { type: 'tube',   label: 'Tube',   color: '#cfefff', key: 't' },
 ];
 
 /** Read the editor's saved level (plain JSON) without starting the editor. */
@@ -58,7 +62,12 @@ export function createEditor({ canvas, statusEl }) {
   let material = MATERIAL_TOOLS[0].type;
   let mode = 'select';                   // 'select' (drag on empty space pans) | 'draw' (drag draws a rectangle)
   let objectTool = null;                 // null | 'spawn' | 'crate' | 'heavy' | 'ball'
-  let selected = null;                   // {kind:'shape', shape} | {kind:'entity', entity} | null
+  let selected = null;                   // {kind:'shape'|'entity'|'switch'|'tube', ...} | null
+  let channel = 'a';                     // channel new switches and doors are wired to
+  let accepts = 'any';                   // what new switches respond to
+  let latch = false;                     // whether new switches stay pressed once triggered
+  let tubeRadius = 22;
+  let pendingTube = null;                // nodes collected while the tube tool is drawing
   let hoverWorld = { x: 0, y: 0 };
   let hoverHit = null;
   let drag = null;
@@ -102,16 +111,21 @@ export function createEditor({ canvas, statusEl }) {
 
   function snapshot() { level.name = $('level-name').value; return JSON.stringify(level.toJSON()); }
 
+  const SEL_FIELD = { shape: 'shape', entity: 'entity', switch: 'sw', tube: 'tube' };
+
   function restore(json) {
-    const keepSel = selected?.kind === 'shape' ? level.shapes.indexOf(selected.shape)
-      : selected?.kind === 'entity' ? level.entities.indexOf(selected.entity) : -1;
     const kind = selected?.kind;
+    const [oldList, item] = listFor(selected);
+    const keep = oldList ? oldList.indexOf(item) : -1;
     level = Level.fromJSON(JSON.parse(json));
     $('level-name').value = level.name;
     selected = null;
-    if (kind === 'shape' && level.shapes[keepSel]) selected = { kind, shape: level.shapes[keepSel] };
-    if (kind === 'entity' && level.entities[keepSel]) selected = { kind, entity: level.entities[keepSel] };
+    if (kind && keep >= 0) {
+      const list = { shape: level.shapes, entity: level.entities, switch: level.switches, tube: level.tubes }[kind];
+      if (list?.[keep]) selected = { kind, [SEL_FIELD[kind]]: list[keep] };
+    }
     syncLevelInputs();
+    refreshChannelList();
     markDirty();
   }
 
@@ -164,17 +178,22 @@ export function createEditor({ canvas, statusEl }) {
   function snapPoint(p) { return { x: snapValue(p.x), y: snapValue(p.y) }; }
   const handleR = () => CONFIG.editor.handleRadius / camera.zoom;
 
-  // ---- Geometry helpers ----
-  function midpoint(shape, i) {
-    const n = shape.nodes.length;
-    const a = shape.nodes[i], b = shape.nodes[(i + 1) % n];
+  // ---- Geometry helpers (shapes are closed paths, tubes are open ones) ----
+  const isClosed = (o) => !(o instanceof Tube);
+  const segCount = (o) => o.nodes.length - (isClosed(o) ? 0 : 1);
+  /** The path object of a selection that has editable nodes, or null. */
+  const pathOf = (sel) => (sel?.kind === 'shape' ? sel.shape : sel?.kind === 'tube' ? sel.tube : null);
+
+  function midpoint(o, i) {
+    const n = o.nodes.length;
+    const a = o.nodes[i], b = o.nodes[(i + 1) % n];
     if (a.cx != null) return quadPoint(a, { x: a.cx, y: a.cy }, b, 0.5);
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   }
 
-  function insertNode(shape, i) {
-    const n = shape.nodes.length;
-    const a = shape.nodes[i], b = shape.nodes[(i + 1) % n];
+  function insertNode(o, i) {
+    const n = o.nodes.length;
+    const a = o.nodes[i], b = o.nodes[(i + 1) % n];
     let node;
     if (a.cx != null) {
       const c = { x: a.cx, y: a.cy };
@@ -184,55 +203,86 @@ export function createEditor({ canvas, statusEl }) {
     } else {
       node = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, cx: null, cy: null };
     }
-    shape.nodes.splice(i + 1, 0, node);
-    shape.rebuild();
+    o.nodes.splice(i + 1, 0, node);
+    rebuildPath(o);
     return i + 1;
   }
 
-  function deleteNode(shape, i) {
-    if (shape.nodes.length <= 3) { flashStatus('A shape needs at least 3 nodes'); return; }
-    shape.nodes.splice(i, 1);
-    shape.rebuild();
+  function deleteNode(o, i) {
+    const min = isClosed(o) ? 3 : 2;
+    if (o.nodes.length <= min) { flashStatus(`Needs at least ${min} nodes`); return; }
+    o.nodes.splice(i, 1);
+    rebuildPath(o);
   }
 
   /** Bend segment i so the curve passes through `p` at its midpoint. */
-  function bendSegment(shape, i, p) {
-    const n = shape.nodes.length;
-    const a = shape.nodes[i], b = shape.nodes[(i + 1) % n];
+  function bendSegment(o, i, p) {
+    const n = o.nodes.length;
+    const a = o.nodes[i], b = o.nodes[(i + 1) % n];
     a.cx = 2 * p.x - (a.x + b.x) / 2;
     a.cy = 2 * p.y - (a.y + b.y) / 2;
-    shape.rebuild();
+    rebuildPath(o);
   }
 
-  function moveNode(shape, i, p) {
-    const n = shape.nodes.length;
-    const node = shape.nodes[i], prev = shape.nodes[(i + n - 1) % n];
+  function moveNode(o, i, p) {
+    const n = o.nodes.length;
+    const node = o.nodes[i];
+    const prev = isClosed(o) || i > 0 ? o.nodes[(i + n - 1) % n] : null;
     const dx = p.x - node.x, dy = p.y - node.y;
     node.x = p.x; node.y = p.y;
     // Controls of the two adjacent segments follow by half so the curves keep their shape relative to the chord.
     if (node.cx != null) { node.cx += dx / 2; node.cy += dy / 2; }
-    if (prev.cx != null) { prev.cx += dx / 2; prev.cy += dy / 2; }
-    shape.rebuild();
+    if (prev?.cx != null) { prev.cx += dx / 2; prev.cy += dy / 2; }
+    rebuildPath(o);
+  }
+
+  /** Shapes track a resting pose for their door motion; tubes just rebuild. */
+  function rebuildPath(o) {
+    o.rebuild();
+    if (isClosed(o)) o.syncBase();
   }
 
   function entityRadius(e) { return (ENTITY_DEFS[e.type].size * CONFIG.tileSize) / 2; }
 
-  /** What is under the cursor, in priority order: handles of the selected shape, objects, shapes. */
+  /** Distance from `p` to a tube's centreline. */
+  function tubeDistance(t, p) {
+    let best = Infinity;
+    for (let i = 1; i < t.points.length; i++) {
+      const a = t.points[i - 1], b = t.points[i];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len2 = dx * dx + dy * dy || 1;
+      const u = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+      best = Math.min(best, Math.hypot(p.x - (a.x + dx * u), p.y - (a.y + dy * u)));
+    }
+    return best;
+  }
+
+  /** What is under the cursor: handles of the selected path first, then elements. */
   function hitTest(w) {
     const hr = handleR();
-    if (selected?.kind === 'shape') {
-      const s = selected.shape, n = s.nodes.length;
-      for (let i = 0; i < n; i++) if (dist(w, s.nodes[i]) <= hr) return { kind: 'node', shape: s, index: i };
-      for (let i = 0; i < n; i++) {
-        const nd = s.nodes[i];
-        if (nd.cx != null && dist(w, { x: nd.cx, y: nd.cy }) <= hr) return { kind: 'ctrl', shape: s, index: i };
+    const path = pathOf(selected);
+    if (path) {
+      const kind = selected.kind, ref = kind === 'shape' ? { shape: path } : { tube: path };
+      const n = path.nodes.length;
+      for (let i = 0; i < n; i++) if (dist(w, path.nodes[i]) <= hr) return { kind: 'node', ...ref, path, index: i };
+      for (let i = 0; i < segCount(path); i++) {
+        const nd = path.nodes[i];
+        if (nd.cx != null && dist(w, { x: nd.cx, y: nd.cy }) <= hr) return { kind: 'ctrl', ...ref, path, index: i };
       }
-      for (let i = 0; i < n; i++) if (dist(w, midpoint(s, i)) <= hr) return { kind: 'mid', shape: s, index: i };
+      for (let i = 0; i < segCount(path); i++) if (dist(w, midpoint(path, i)) <= hr) return { kind: 'mid', ...ref, path, index: i };
     }
     if (dist(w, level.spawn) <= CONFIG.player.radius + 2 / camera.zoom) return { kind: 'spawn' };
+    for (let i = level.switches.length - 1; i >= 0; i--) {
+      const s = level.switches[i], r = s.rect;
+      if (w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y - 4 && w.y <= r.y + r.h + 2) return { kind: 'switch', sw: s };
+    }
     for (let i = level.entities.length - 1; i >= 0; i--) {
       const e = level.entities[i];
       if (dist(w, e) <= entityRadius(e)) return { kind: 'entity', entity: e };
+    }
+    for (let i = level.tubes.length - 1; i >= 0; i--) {
+      const t = level.tubes[i];
+      if (t.usable && tubeDistance(t, w) <= t.radius) return { kind: 'tube', tube: t };
     }
     for (let i = level.shapes.length - 1; i >= 0; i--) {
       const s = level.shapes[i];
@@ -247,11 +297,22 @@ export function createEditor({ canvas, statusEl }) {
     refreshSelectionInfo();
   }
 
+  /** The array a selected element lives in, so delete/duplicate stay generic. */
+  function listFor(sel) {
+    switch (sel?.kind) {
+      case 'shape': return [level.shapes, sel.shape];
+      case 'entity': return [level.entities, sel.entity];
+      case 'switch': return [level.switches, sel.sw];
+      case 'tube': return [level.tubes, sel.tube];
+      default: return [null, null];
+    }
+  }
+
   function deleteSelected() {
-    if (!selected) return;
+    const [list, item] = listFor(selected);
+    if (!list) return;
     pushUndo();
-    if (selected.kind === 'shape') level.shapes.splice(level.shapes.indexOf(selected.shape), 1);
-    else level.entities.splice(level.entities.indexOf(selected.entity), 1);
+    list.splice(list.indexOf(item), 1);
     selected = null;
     markDirty();
   }
@@ -264,6 +325,14 @@ export function createEditor({ canvas, statusEl }) {
       const copy = selected.shape.clone().translate(off, off);
       level.shapes.push(copy);
       selected = { kind: 'shape', shape: copy };
+    } else if (selected.kind === 'tube') {
+      const copy = selected.tube.clone().translate(off, off);
+      level.tubes.push(copy);
+      selected = { kind: 'tube', tube: copy };
+    } else if (selected.kind === 'switch') {
+      const s = new Switch({ ...selected.sw.toJSON(), x: selected.sw.x + off, y: selected.sw.y + off });
+      level.switches.push(s);
+      selected = { kind: 'switch', sw: s };
     } else {
       const e = { ...selected.entity, x: selected.entity.x + off, y: selected.entity.y + off };
       level.entities.push(e);
@@ -273,10 +342,11 @@ export function createEditor({ canvas, statusEl }) {
   }
 
   function straightenSelected() {
-    if (selected?.kind !== 'shape') return;
+    const path = pathOf(selected);
+    if (!path) return;
     pushUndo();
-    for (const n of selected.shape.nodes) { n.cx = null; n.cy = null; }
-    selected.shape.rebuild();
+    for (const n of path.nodes) { n.cx = null; n.cy = null; }
+    rebuildPath(path);
     markDirty();
   }
 
@@ -293,8 +363,11 @@ export function createEditor({ canvas, statusEl }) {
     renderer.drawGrid(ctx, rect, gridSize, 4);
     renderer.drawBounds(ctx, level);
     renderer.drawShapes(ctx, level.shapes, rect);
+    renderer.drawSwitches(ctx, level.switches, rect);
     for (const e of level.entities) drawEntityPreview(ctx, e, CONFIG.tileSize);
     drawSpawn(ctx, level.spawn.x, level.spawn.y, CONFIG.player.radius, CONFIG.render.ballColor);
+    renderer.drawTubes(ctx, level.tubes, rect);
+    drawDoorHints(ctx);
     drawOverlay(ctx);
 
     if (Date.now() > statusOverrideUntil) {
@@ -312,11 +385,42 @@ export function createEditor({ canvas, statusEl }) {
       case 'node': return `node ${h.index}`;
       case 'ctrl': return `curve control ${h.index}`;
       case 'mid': return 'midpoint: click to add node, drag to bend';
-      case 'shape': return `${Materials[h.shape.type].label} shape (${h.shape.nodes.length} nodes)`;
+      case 'shape': return `${Materials[h.shape.type].label}${h.shape.isDoor ? ` door "${h.shape.channel}"` : ' shape'} (${h.shape.nodes.length} nodes)`;
       case 'entity': return ENTITY_DEFS[h.entity.type].label;
+      case 'switch': return `switch "${h.sw.channel}" · ${SWITCH_ACCEPTS[h.sw.accepts].label}${h.sw.latch ? ' · one-time' : ''}`;
+      case 'tube': return `tube (${h.tube.nodes.length} nodes, ${Math.round(h.tube.length)}px)`;
       case 'spawn': return 'spawn';
       default: return '';
     }
+  }
+
+  /** Show where each door travels when its channel is powered, and which switches drive it. */
+  function drawDoorHints(ctx) {
+    const z = camera.zoom;
+    ctx.save();
+    ctx.setLineDash([5 / z, 4 / z]);
+    ctx.lineWidth = 1.5 / z;
+    for (const s of level.shapes) {
+      if (!s.isDoor) continue;
+      const cx = s.centerX, cy = s.centerY;
+      ctx.strokeStyle = 'rgba(11,99,197,0.75)';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + s.move.dx, cy + s.move.dy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(cx + s.move.dx, cy + s.move.dy, 4 / z, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(11,99,197,0.75)';
+      ctx.fill();
+      ctx.setLineDash([5 / z, 4 / z]);
+      ctx.fillStyle = '#0b63c5';
+      ctx.font = `${11 / z}px ui-monospace, Menlo, monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(String(s.channel).toUpperCase(), cx, cy);
+      ctx.textAlign = 'start';
+    }
+    ctx.restore();
   }
 
   function drawOverlay(ctx) {
@@ -341,12 +445,28 @@ export function createEditor({ canvas, statusEl }) {
       ctx.setLineDash([]);
     }
 
-    if (selected?.kind === 'shape') {
-      const s = selected.shape, n = s.nodes.length;
-      Renderer.tracePath(ctx, s);
+    if (selected?.kind === 'switch') {
+      const r = selected.sw.rect;
+      ctx.setLineDash([4 / z, 3 / z]);
+      ctx.strokeStyle = '#0b63c5';
+      ctx.lineWidth = 1.5 / z;
+      ctx.strokeRect(r.x - 3 / z, r.y - 3 / z, r.w + 6 / z, r.h + 6 / z);
+      ctx.setLineDash([]);
+    }
+
+    const sel = pathOf(selected);
+    if (sel) {
+      const n = sel.nodes.length, segs = segCount(sel);
       ctx.lineJoin = 'round';
       ctx.lineWidth = 2 / z;
       ctx.strokeStyle = '#0b63c5';
+      if (isClosed(sel)) {
+        Renderer.tracePath(ctx, sel);
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(sel.points[0].x, sel.points[0].y);
+        for (let i = 1; i < sel.points.length; i++) ctx.lineTo(sel.points[i].x, sel.points[i].y);
+      }
       ctx.stroke();
 
       // control polygons
@@ -354,8 +474,8 @@ export function createEditor({ canvas, statusEl }) {
       ctx.lineWidth = 1 / z;
       ctx.strokeStyle = 'rgba(11,99,197,0.6)';
       ctx.beginPath();
-      for (let i = 0; i < n; i++) {
-        const a = s.nodes[i], b = s.nodes[(i + 1) % n];
+      for (let i = 0; i < segs; i++) {
+        const a = sel.nodes[i], b = sel.nodes[(i + 1) % n];
         if (a.cx == null) continue;
         ctx.moveTo(a.x, a.y); ctx.lineTo(a.cx, a.cy); ctx.lineTo(b.x, b.y);
       }
@@ -363,8 +483,8 @@ export function createEditor({ canvas, statusEl }) {
       ctx.setLineDash([]);
 
       // midpoint handles
-      for (let i = 0; i < n; i++) {
-        const m = midpoint(s, i);
+      for (let i = 0; i < segs; i++) {
+        const m = midpoint(sel, i);
         const hot = hoverHit?.kind === 'mid' && hoverHit.index === i;
         ctx.beginPath(); ctx.arc(m.x, m.y, (hot ? hr : hr * 0.6), 0, Math.PI * 2);
         ctx.fillStyle = hot ? '#0b63c5' : 'rgba(23,28,39,0.9)';
@@ -374,8 +494,8 @@ export function createEditor({ canvas, statusEl }) {
         ctx.stroke();
       }
       // control handles
-      for (let i = 0; i < n; i++) {
-        const a = s.nodes[i];
+      for (let i = 0; i < segs; i++) {
+        const a = sel.nodes[i];
         if (a.cx == null) continue;
         const hot = hoverHit?.kind === 'ctrl' && hoverHit.index === i;
         const r = hot ? hr : hr * 0.75;
@@ -387,11 +507,31 @@ export function createEditor({ canvas, statusEl }) {
       }
       // node handles
       for (let i = 0; i < n; i++) {
-        const a = s.nodes[i];
+        const a = sel.nodes[i];
         const hot = hoverHit?.kind === 'node' && hoverHit.index === i;
         ctx.beginPath(); ctx.arc(a.x, a.y, hot ? hr * 1.2 : hr, 0, Math.PI * 2);
         ctx.fillStyle = hot ? '#ffffff' : '#0b63c5';
         ctx.fill();
+        ctx.lineWidth = 1.5 / z; ctx.strokeStyle = '#161a23'; ctx.stroke();
+      }
+    }
+
+    // tube being drawn
+    if (pendingTube) {
+      const pts = [...pendingTube, snapPoint(hoverWorld)];
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = tubeRadius * 2;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      ctx.strokeStyle = '#0b63c5';
+      ctx.lineWidth = 2 / z;
+      ctx.stroke();
+      for (const p of pendingTube) {
+        ctx.beginPath(); ctx.arc(p.x, p.y, hr, 0, Math.PI * 2);
+        ctx.fillStyle = '#0b63c5'; ctx.fill();
         ctx.lineWidth = 1.5 / z; ctx.strokeStyle = '#161a23'; ctx.stroke();
       }
     }
@@ -412,13 +552,23 @@ export function createEditor({ canvas, statusEl }) {
 
     if (objectTool && !drag && !isPanning) {
       const p = snapPoint(hoverWorld);
+      ctx.globalAlpha = 0.5;
       if (objectTool === 'spawn') {
-        ctx.globalAlpha = 0.5;
         drawSpawn(ctx, p.x, p.y, CONFIG.player.radius, CONFIG.render.ballColor);
-        ctx.globalAlpha = 1;
+      } else if (objectTool === 'switch') {
+        const sw = new Switch({ x: p.x, y: p.y, channel, accepts, latch });
+        ctx.fillStyle = sw.color;
+        ctx.beginPath(); ctx.roundRect(sw.rect.x, sw.rect.y, sw.rect.w, sw.rect.h, 3); ctx.fill();
+        ctx.lineWidth = 2 / z; ctx.strokeStyle = CONFIG.render.outlineColor; ctx.stroke();
+      } else if (objectTool === 'tube') {
+        if (!pendingTube) {
+          ctx.lineWidth = 3 / z; ctx.strokeStyle = '#ffffff';
+          ctx.beginPath(); ctx.arc(p.x, p.y, tubeRadius, 0, Math.PI * 2); ctx.stroke();
+        }
       } else {
-        drawEntityPreview(ctx, { type: objectTool, x: p.x, y: p.y }, CONFIG.tileSize, 0.5);
+        drawEntityPreview(ctx, { type: objectTool, x: p.x, y: p.y }, CONFIG.tileSize, 1);
       }
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -438,10 +588,21 @@ export function createEditor({ canvas, statusEl }) {
     if (e.button === 2) { rightClick(w); return; }
     if (e.button !== 0) return;
 
+    if (objectTool === 'tube') {
+      pendingTube = pendingTube ?? [];
+      pendingTube.push(p);
+      return;
+    }
     if (objectTool) {
       pushUndo();
-      if (objectTool === 'spawn') { level.spawn = { x: p.x, y: p.y }; }
-      else {
+      if (objectTool === 'spawn') {
+        level.spawn = { x: p.x, y: p.y };
+      } else if (objectTool === 'switch') {
+        const sw = new Switch({ x: p.x, y: p.y, channel, accepts, latch });
+        level.switches.push(sw);
+        select({ kind: 'switch', sw });
+        refreshChannelList();
+      } else {
         const ent = { type: objectTool, x: p.x, y: p.y };
         level.entities.push(ent);
         select({ kind: 'entity', entity: ent });
@@ -461,19 +622,24 @@ export function createEditor({ canvas, statusEl }) {
     switch (hit.kind) {
       case 'node':
         pushUndo();
-        drag = { kind: 'node', shape: hit.shape, index: hit.index };
+        drag = { kind: 'node', path: hit.path, index: hit.index };
         break;
       case 'ctrl':
         pushUndo();
-        drag = { kind: 'ctrl', shape: hit.shape, index: hit.index };
+        drag = { kind: 'ctrl', path: hit.path, index: hit.index };
         break;
       case 'mid':
         pushUndo();
-        drag = { kind: 'mid', shape: hit.shape, index: hit.index, start: w, moved: false };
+        drag = { kind: 'mid', path: hit.path, index: hit.index, start: w, moved: false };
         break;
       case 'spawn':
         pushUndo();
         drag = { kind: 'spawn' };
+        break;
+      case 'switch':
+        select({ kind: 'switch', sw: hit.sw });
+        pushUndo();
+        drag = { kind: 'switch', sw: hit.sw, origin: w, start: { x: hit.sw.x, y: hit.sw.y } };
         break;
       case 'entity':
         select({ kind: 'entity', entity: hit.entity });
@@ -481,28 +647,43 @@ export function createEditor({ canvas, statusEl }) {
         drag = { kind: 'entity', entity: hit.entity, origin: w, start: { x: hit.entity.x, y: hit.entity.y } };
         break;
       case 'shape':
-        select({ kind: 'shape', shape: hit.shape });
+      case 'tube': {
+        const path = hit.kind === 'shape' ? hit.shape : hit.tube;
+        select(hit.kind === 'shape' ? { kind: 'shape', shape: path } : { kind: 'tube', tube: path });
         pushUndo();
-        drag = {
-          kind: 'shape', shape: hit.shape, origin: w,
-          nodes: hit.shape.nodes.map((n) => ({ ...n })),
-          moved: false,
-        };
+        drag = { kind: 'path', path, origin: w, nodes: path.nodes.map((n) => ({ ...n })), moved: false };
         break;
+      }
     }
   }, { signal });
 
   function rightClick(w) {
+    if (pendingTube) { finishTube(); return; }
     const hit = hitTest(w);
     if (!hit) return;
+    const drop = (list, item) => { list.splice(list.indexOf(item), 1); if (listFor(selected)[1] === item) selected = null; };
     switch (hit.kind) {
-      case 'node': pushUndo(); deleteNode(hit.shape, hit.index); break;
-      case 'ctrl': pushUndo(); hit.shape.nodes[hit.index].cx = hit.shape.nodes[hit.index].cy = null; hit.shape.rebuild(); break;
-      case 'mid': pushUndo(); insertNode(hit.shape, hit.index); break;
-      case 'entity': pushUndo(); level.entities.splice(level.entities.indexOf(hit.entity), 1); if (selected?.entity === hit.entity) selected = null; break;
-      case 'shape': pushUndo(); level.shapes.splice(level.shapes.indexOf(hit.shape), 1); if (selected?.shape === hit.shape) selected = null; break;
+      case 'node': pushUndo(); deleteNode(hit.path, hit.index); break;
+      case 'ctrl': pushUndo(); hit.path.nodes[hit.index].cx = hit.path.nodes[hit.index].cy = null; rebuildPath(hit.path); break;
+      case 'mid': pushUndo(); insertNode(hit.path, hit.index); break;
+      case 'switch': pushUndo(); drop(level.switches, hit.sw); break;
+      case 'entity': pushUndo(); drop(level.entities, hit.entity); break;
+      case 'tube': pushUndo(); drop(level.tubes, hit.tube); break;
+      case 'shape': pushUndo(); drop(level.shapes, hit.shape); break;
       default: return;
     }
+    markDirty();
+  }
+
+  function finishTube() {
+    const pts = pendingTube;
+    pendingTube = null;
+    if (!pts || pts.length < 2) { flashStatus('A tube needs at least 2 points'); return; }
+    pushUndo();
+    const t = new Tube({ nodes: pts, radius: tubeRadius });
+    level.tubes.push(t);
+    setSelectMode();
+    select({ kind: 'tube', tube: t });
     markDirty();
   }
 
@@ -525,30 +706,35 @@ export function createEditor({ canvas, statusEl }) {
     const d = drag;
     switch (d.kind) {
       case 'rect': d.cur = p; break;
-      case 'node': moveNode(d.shape, d.index, p); break;
-      case 'ctrl': { const nd = d.shape.nodes[d.index]; nd.cx = p.x; nd.cy = p.y; d.shape.rebuild(); break; }
+      case 'node': moveNode(d.path, d.index, p); break;
+      case 'ctrl': { const nd = d.path.nodes[d.index]; nd.cx = p.x; nd.cy = p.y; rebuildPath(d.path); break; }
       case 'mid':
         if (!d.moved && dist(w, d.start) * camera.zoom > 4) d.moved = true;
-        if (d.moved) bendSegment(d.shape, d.index, p);
+        if (d.moved) bendSegment(d.path, d.index, p);
         break;
       case 'spawn': level.spawn = { x: p.x, y: p.y }; break;
+      case 'switch': {
+        const t = snapPoint({ x: d.start.x + (w.x - d.origin.x), y: d.start.y + (w.y - d.origin.y) });
+        d.sw.x = t.x; d.sw.y = t.y;
+        break;
+      }
       case 'entity': {
         const t = snapPoint({ x: d.start.x + (w.x - d.origin.x), y: d.start.y + (w.y - d.origin.y) });
         d.entity.x = t.x; d.entity.y = t.y;
         break;
       }
-      case 'shape': {
+      case 'path': {
         // Move so the first node lands on the grid; every node and control follows by the same delta.
         const anchor = d.nodes[0];
         const t = snapPoint({ x: anchor.x + (w.x - d.origin.x), y: anchor.y + (w.y - d.origin.y) });
         const dx = t.x - anchor.x, dy = t.y - anchor.y;
         if (dx !== 0 || dy !== 0) d.moved = true;
-        d.shape.nodes.forEach((n, i) => {
+        d.path.nodes.forEach((n, i) => {
           const o = d.nodes[i];
           n.x = o.x + dx; n.y = o.y + dy;
           if (o.cx != null) { n.cx = o.cx + dx; n.cy = o.cy + dy; }
         });
-        d.shape.rebuild();
+        rebuildPath(d.path);
         break;
       }
     }
@@ -571,7 +757,7 @@ export function createEditor({ canvas, statusEl }) {
         markDirty();
       }
     } else if (d.kind === 'mid' && !d.moved) {
-      insertNode(d.shape, d.index);
+      insertNode(d.path, d.index);
       markDirty();
     }
     hoverHit = hitTest(worldFromEvent(e));
@@ -597,7 +783,7 @@ export function createEditor({ canvas, statusEl }) {
     if (objectTool) { canvas.style.cursor = 'copy'; return; }
     const k = hoverHit?.kind;
     canvas.style.cursor = k === 'node' || k === 'ctrl' || k === 'mid' ? 'pointer'
-      : k === 'shape' || k === 'entity' || k === 'spawn' ? 'move'
+      : k === 'shape' || k === 'entity' || k === 'spawn' || k === 'switch' || k === 'tube' ? 'move'
       : mode === 'draw' ? 'crosshair' : 'grab';
   }
 
@@ -621,12 +807,14 @@ export function createEditor({ canvas, statusEl }) {
     if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
-      if (hoverHit?.kind === 'node') { pushUndo(); deleteNode(hoverHit.shape, hoverHit.index); markDirty(); }
+      if (hoverHit?.kind === 'node') { pushUndo(); deleteNode(hoverHit.path, hoverHit.index); markDirty(); }
       else deleteSelected();
       return;
     }
+    if (e.key === 'Enter' && pendingTube) { e.preventDefault(); finishTube(); return; }
     if (e.code === 'Escape') {
-      if (drag) { drag = null; undo(); }
+      if (pendingTube) { pendingTube = null; flashStatus('Tube cancelled'); }
+      else if (drag) { drag = null; undo(); }
       else if (objectTool || mode === 'draw') setSelectMode();
       else select(null);
     }
@@ -675,12 +863,14 @@ export function createEditor({ canvas, statusEl }) {
   }
 
   function setObjectTool(type) {
+    if (pendingTube && type !== 'tube') pendingTube = null;
     objectTool = objectTool === type ? null : type;
     if (objectTool) mode = 'select';
     refreshTools();
   }
 
   function setSelectMode() {
+    pendingTube = null;
     objectTool = null;
     mode = 'select';
     refreshTools();
@@ -689,24 +879,111 @@ export function createEditor({ canvas, statusEl }) {
   function refreshSelectionInfo() {
     const info = $('selection-info');
     const shapeSel = selected?.kind === 'shape';
-    $('sel-straighten').disabled = !shapeSel;
+    $('sel-straighten').disabled = !pathOf(selected);
     $('sel-duplicate').disabled = !selected;
     $('sel-delete').disabled = !selected;
-    if (!selected) { info.textContent = 'Nothing selected'; return; }
+    $('door-row').hidden = !shapeSel;
     if (shapeSel) {
       const s = selected.shape;
-      const curves = s.nodes.filter((n) => n.cx != null).length;
-      info.textContent = `${Materials[s.type].label} · ${s.nodes.length} nodes${curves ? ` · ${curves} curved` : ''} · ${Math.round(s.w)}×${Math.round(s.h)}`;
-    } else {
-      const e = selected.entity;
-      info.textContent = `${ENTITY_DEFS[e.type].label} at ${Math.round(e.x)}, ${Math.round(e.y)}`;
+      $('door-on').checked = s.isDoor;
+      $('door-dx').value = s.move?.dx ?? 0;
+      $('door-dy').value = s.move?.dy ?? -Math.round(s.h || 96);
     }
+    // Selecting a wired element picks up its settings, so the next one you place matches it.
+    const wired = selected?.kind === 'switch' ? selected.sw : shapeSel && selected.shape.isDoor ? selected.shape : null;
+    if (wired) { channel = wired.channel; $('channel').value = channel; }
+    if (selected?.kind === 'switch') {
+      accepts = selected.sw.accepts; $('accepts').value = accepts;
+      latch = selected.sw.latch; $('switch-latch').checked = latch;
+    }
+    if (!selected) { info.textContent = 'Nothing selected'; return; }
+    switch (selected.kind) {
+      case 'shape': {
+        const s = selected.shape;
+        const curves = s.nodes.filter((n) => n.cx != null).length;
+        info.textContent = `${Materials[s.type].label}${s.isDoor ? ` door "${s.channel}"` : ''} · ${s.nodes.length} nodes`
+          + `${curves ? ` · ${curves} curved` : ''} · ${Math.round(s.w)}×${Math.round(s.h)}`;
+        break;
+      }
+      case 'switch': {
+        const s = selected.sw;
+        info.textContent = `Switch "${s.channel}" · takes ${SWITCH_ACCEPTS[s.accepts].label}${s.latch ? ' · one-time' : ''}`;
+        break;
+      }
+      case 'tube': {
+        const t = selected.tube;
+        info.textContent = `Tube · ${t.nodes.length} nodes · ${Math.round(t.length)}px · r${t.radius}`;
+        break;
+      }
+      default: {
+        const e = selected.entity;
+        info.textContent = `${ENTITY_DEFS[e.type].label} at ${Math.round(e.x)}, ${Math.round(e.y)}`;
+      }
+    }
+  }
+
+  /** Wire the selected shape as a door on the current channel (or unwire it). */
+  function applyDoor() {
+    if (selected?.kind !== 'shape') return;
+    const s = selected.shape;
+    pushUndo();
+    if (!$('door-on').checked) {
+      this?.blur?.();
+      s.setOffset(0);
+      s.channel = null; s.move = null;
+    } else {
+      s.channel = channel;
+      s.move = { dx: +$('door-dx').value || 0, dy: +$('door-dy').value || 0, duration: CONFIG.logic.doorDuration };
+    }
+    refreshChannelList();
+    markDirty();
   }
 
   const on = (id, fn) => $(id).addEventListener('click', (e) => { fn(e); e.currentTarget.blur(); }, { signal });
   on('sel-delete', deleteSelected);
   on('sel-duplicate', duplicateSelected);
   on('sel-straighten', straightenSelected);
+
+  // ---- Logic controls (switch channel / filter, tube radius, door motion) ----
+  $('channel').value = channel;
+  $('channel').addEventListener('change', (e) => {
+    channel = e.target.value.trim() || 'a';
+    e.target.value = channel;
+    if (selected?.kind === 'switch') { pushUndo(); selected.sw.channel = channel; markDirty(); }
+    else if (selected?.kind === 'shape' && selected.shape.isDoor) { pushUndo(); selected.shape.channel = channel; markDirty(); }
+    refreshChannelList();
+  }, { signal });
+
+  $('accepts').value = accepts;
+  $('accepts').addEventListener('change', (e) => {
+    accepts = e.target.value;
+    if (selected?.kind === 'switch') { pushUndo(); selected.sw.accepts = accepts; markDirty(); }
+  }, { signal });
+
+  $('switch-latch').addEventListener('change', (e) => {
+    latch = e.target.checked;
+    if (selected?.kind === 'switch') { pushUndo(); selected.sw.latch = latch; markDirty(); }
+  }, { signal });
+
+  /** Offer every channel already used in the level as an autocomplete suggestion. */
+  function refreshChannelList() {
+    const used = new Set(level.switches.map((s) => s.channel));
+    for (const s of level.shapes) if (s.channel) used.add(s.channel);
+    used.add(channel);
+    $('channel-list').innerHTML = [...used].sort()
+      .map((c) => `<option value="${c.replace(/"/g, '&quot;')}"></option>`).join('');
+  }
+
+  $('tube-radius').value = tubeRadius;
+  $('tube-radius').addEventListener('change', (e) => {
+    tubeRadius = Math.max(8, Math.min(80, +e.target.value || tubeRadius));
+    e.target.value = tubeRadius;
+    if (selected?.kind === 'tube') { pushUndo(); selected.tube.radius = tubeRadius; selected.tube.rebuild(); markDirty(); }
+  }, { signal });
+
+  for (const id of ['door-on', 'door-dx', 'door-dy']) {
+    $(id).addEventListener('change', applyDoor, { signal });
+  }
 
   function syncLevelInputs() {
     $('level-w').value = level.width;
@@ -828,6 +1105,7 @@ export function createEditor({ canvas, statusEl }) {
 
   // ---- Boot ----
   syncLevelInputs();
+  refreshChannelList();
   refreshSelectionInfo();
   refreshTools();
   camera.setView(canvas.clientWidth || 800, canvas.clientHeight || 600);
@@ -840,6 +1118,7 @@ export function createEditor({ canvas, statusEl }) {
     camera, MATERIAL_TOOLS, OBJECT_TOOLS,
     get material() { return material; },
     set material(t) { setMaterial(t); },
+    get channel() { return channel; },
     get mode() { return objectTool ? `place:${objectTool}` : mode; },
     undo, redo,
     stop() {

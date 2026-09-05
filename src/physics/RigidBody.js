@@ -43,7 +43,11 @@ export class RigidBody {
     this.aabb = { x: 0, y: 0, w: 0, h: 0 };
     /** Contacts from the last step: {other, nx, ny} with the normal pointing toward `other`. */
     this.contacts = [];
-    this.grabbed = false;
+    /** The level shape this static body was built from, if any. */
+    this.source = null;
+    /** Held by the player (see GameScene) / riding inside a tube. */
+    this.carried = false;
+    this.travelling = false;
 
     if (shape === 'terrain') {
       this.mass = Infinity; this.inertia = Infinity; this.invMass = 0; this.invI = 0;

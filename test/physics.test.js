@@ -10,6 +10,7 @@ import { Level } from '../src/world/Level.js';
 import { createStaticBodies } from '../src/world/Entities.js';
 import { decomposeConvex, isConvex, flattenPath, signedArea2 } from '../src/math/Geometry.js';
 import { PlatformerMotor, MotorState } from '../src/player/PlatformerMotor.js';
+import { GameScene } from '../src/scenes/GameScene.js';
 import { CONFIG } from '../src/config.js';
 import { LEVEL_1 } from '../src/levels/level1.js';
 
@@ -321,6 +322,195 @@ test('level JSON round-trips including curves, and level1 loads', () => {
   assert.equal(back.width, 300);
   const l1 = Level.fromJSON(LEVEL_1);
   assert.ok(l1.playable && l1.shapes.length > 10 && l1.entities.length > 0);
+});
+
+// ---------------------------------------------------------------------------
+// Logic elements: switches, powered doors, tubes and carrying.
+
+class StubInput {
+  constructor() { this.down = new Set(); }
+  poll() {}
+  isDown(a) { return this.down.has(a); }
+  justPressed() { return false; }
+  justReleased() { return false; }
+  axis(n, p) { return (this.down.has(p) ? 1 : 0) - (this.down.has(n) ? 1 : 0); }
+}
+
+const FLOOR = { type: 'solid', nodes: [{ x: 0, y: 600 }, { x: 1200, y: 600 }, { x: 1200, y: 640 }, { x: 0, y: 640 }] };
+function makeScene(data) {
+  const input = new StubInput();
+  const level = Level.fromJSON({ width: 1200, height: 700, spawn: { x: 100, y: 560 }, shapes: [FLOOR], ...data });
+  return { scene: new GameScene({ input, level, config: CONFIG }), input };
+}
+const runScene = (s, n) => { for (let i = 0; i < n; i++) s.update(DT); };
+
+test('a switch powers a door on its channel, and releases it again', () => {
+  const door = {
+    type: 'solid', nodes: [{ x: 600, y: 440 }, { x: 660, y: 440 }, { x: 660, y: 600 }, { x: 600, y: 600 }],
+    channel: 'a', move: { dx: 0, dy: -170, duration: 0.4 },
+  };
+  const { scene } = makeScene({
+    shapes: [FLOOR, door],
+    switches: [{ x: 300, y: 590, channel: 'a', accepts: 'any' }],
+    entities: [{ type: 'crate', x: 300, y: 540 }],
+  });
+  const d = scene.level.shapes[1];
+  near(d.y, 440, 1e-6);
+  runScene(scene, 240);
+  assert.ok(scene.level.switches[0].active, 'crate presses the plate');
+  near(d.offset, 1, 1e-6);
+  near(d.y, 270, 1e-6);
+  scene.rigid.remove(scene.objects[0]);
+  scene.objects.length = 0;
+  runScene(scene, 240);
+  assert.equal(scene.level.switches[0].active, false);
+  near(d.offset, 0, 1e-6);
+  near(d.y, 440, 1e-6);
+});
+
+test('a one-time switch stays pressed after whatever triggered it leaves', () => {
+  const door = {
+    type: 'solid', nodes: [{ x: 600, y: 440 }, { x: 660, y: 440 }, { x: 660, y: 600 }, { x: 600, y: 600 }],
+    channel: 'vault-door', move: { dx: 0, dy: -170, duration: 0.4 },
+  };
+  const { scene } = makeScene({
+    shapes: [FLOOR, door],
+    switches: [{ x: 300, y: 600, channel: 'vault-door', accepts: 'any', latch: true }],
+    entities: [{ type: 'crate', x: 300, y: 540 }],
+  });
+  const sw = scene.level.switches[0], d = scene.level.shapes[1];
+  runScene(scene, 200);
+  assert.ok(sw.active && sw.latched, 'latched once pressed');
+  scene.rigid.remove(scene.objects[0]);
+  scene.objects.length = 0;
+  runScene(scene, 300);
+  assert.ok(sw.active, 'stays pressed with nothing on it');
+  near(d.offset, 1, 1e-6);
+  scene.respawn();
+  assert.equal(sw.latched, false, 'a respawn resets it');
+  assert.equal(sw.active, false);
+});
+
+test('channels are arbitrary strings and survive a round-trip', () => {
+  const l = Level.fromJSON(JSON.parse(JSON.stringify(Level.fromJSON({
+    width: 800, height: 600, spawn: { x: 10, y: 10 },
+    shapes: [{ type: 'solid', nodes: [{ x: 0, y: 0 }, { x: 9, y: 0 }, { x: 9, y: 9 }], channel: 'gate 7', move: { dx: 5, dy: 0 } }],
+    switches: [{ x: 1, y: 2, channel: 'gate 7', accepts: 'any', latch: true }],
+  }).toJSON())));
+  assert.equal(l.switches[0].channel, 'gate 7');
+  assert.equal(l.switches[0].latch, true);
+  assert.equal(l.shapes[0].channel, 'gate 7');
+});
+
+test('switch filters accept only their own kind', () => {
+  for (const [accepts, expected] of [['any', true], ['box', true], ['ball', false], ['player', false]]) {
+    const { scene } = makeScene({
+      switches: [{ x: 300, y: 590, channel: 'a', accepts }],
+      entities: [{ type: 'crate', x: 300, y: 540 }],
+    });
+    runScene(scene, 200);
+    assert.equal(scene.level.switches[0].active, expected, `crate on accepts=${accepts}`);
+  }
+});
+
+test('a tube swallows an object, moves it along the path, and spits it out the far end', () => {
+  const { scene } = makeScene({
+    tubes: [{ radius: 26, nodes: [{ x: 420, y: 585 }, { x: 700, y: 300 }, { x: 980, y: 585 }] }],
+    entities: [{ type: 'ball', x: 340, y: 585 }],
+  });
+  const o = scene.objects[0];
+  o.vel.x = 400;
+  let inside = 0, highest = Infinity;
+  for (let i = 0; i < 400; i++) {
+    scene.update(DT);
+    if (scene.riders.length) { inside++; highest = Math.min(highest, o.pos.y); }
+  }
+  assert.ok(inside > 30, `should be visibly inside for a while, got ${inside} steps`);
+  assert.ok(highest < 350, `should follow the path up, highest y=${highest}`);
+  assert.ok(o.pos.x > 950, `should come out the far end, x=${o.pos.x}`);
+  assert.equal(o.travelling, false);
+});
+
+test('the player rides a tube too', () => {
+  const { scene, input } = makeScene({
+    tubes: [{ radius: 26, nodes: [{ x: 420, y: 585 }, { x: 700, y: 250 }, { x: 980, y: 585 }] }],
+    spawn: { x: 330, y: 585 },
+  });
+  input.down.add('right');
+  let rode = false, highest = Infinity;
+  for (let i = 0; i < 400; i++) {
+    scene.update(DT);
+    if (scene.riders.some((r) => r.kind === 'player')) { rode = true; highest = Math.min(highest, scene.ball.pos.y); }
+  }
+  assert.ok(rode, 'player should be swallowed');
+  assert.ok(highest < 300, `player should travel up the tube, highest y=${highest}`);
+});
+
+test('a tube whose exit faces a wall cannot swallow you forever', () => {
+  // The exit throws the player into a bouncy wall, which fires them straight back at the
+  // mouth. Without the post-exit cooldown they are re-swallowed every time and never escape.
+  const bouncy = { type: 'bouncy', nodes: [{ x: 1010, y: 470 }, { x: 1070, y: 470 }, { x: 1070, y: 600 }, { x: 1010, y: 600 }] };
+  const { scene, input } = makeScene({
+    width: 1400, shapes: [{ type: 'solid', nodes: [{ x: 0, y: 600 }, { x: 1400, y: 600 }, { x: 1400, y: 640 }, { x: 0, y: 640 }] }, bouncy],
+    tubes: [{ radius: 26, nodes: [{ x: 420, y: 587 }, { x: 700, y: 330 }, { x: 980, y: 587 }] }],
+    spawn: { x: 300, y: 587 },
+  });
+  input.down.add('right');
+  let insideRun = 0, longest = 0;
+  for (let i = 0; i < 2400; i++) {
+    scene.update(DT);
+    insideRun = scene.riders.length ? insideRun + 1 : 0;
+    longest = Math.max(longest, insideRun);
+  }
+  assert.equal(scene.riders.length, 0, 'must not end the run trapped inside the tube');
+  assert.ok(longest < 400, `never stuck inside for long, longest stay ${longest} steps`);
+});
+
+test('a tube is solid except at its mouths', () => {
+  // A pipe crossing the floor: its side wall stands in the way, its mouth does not.
+  const { scene, input } = makeScene({
+    tubes: [{ radius: 26, wall: 7, nodes: [{ x: 500, y: 300 }, { x: 500, y: 700 }] }],
+  });
+  assert.ok(scene.tubeWalls.length > 0, 'pipe walls become collidable geometry');
+  input.down.add('right');
+  runScene(scene, 400);
+  assert.ok(scene.ball.body.contacts.right, 'stopped by the pipe wall');
+  near(scene.ball.pos.x, 500 - 26 - 7 - scene.ball.body.radius, 1.5);
+});
+
+test('holding grab carries an object, swaps sides on turning, and releases it', () => {
+  const { scene, input } = makeScene({ entities: [{ type: 'crate', x: 200, y: 560 }] });
+  const crate = scene.objects[0];
+  runScene(scene, 60);
+  assert.equal(scene.carried, null);
+
+  input.down.add('grab');
+  input.down.add('right');
+  runScene(scene, 120);
+  assert.equal(scene.carried, crate, 'running into it while holding grab picks it up');
+  // Locked flush to the player's side, not sprung: the offset is exact and never drifts.
+  const expected = scene.ball.body.radius + crate.radius + CONFIG.logic.carryGap;
+  near(crate.pos.x - scene.ball.pos.x, expected, 1e-6);
+  near(crate.pos.y, scene.ball.pos.y, 1e-6);
+  runScene(scene, 60);
+  near(crate.pos.x - scene.ball.pos.x, expected, 1e-6);
+
+  input.down.delete('right');
+  input.down.add('left');
+  runScene(scene, 120);
+  near(crate.pos.x - scene.ball.pos.x, -expected, 1e-6);
+
+  input.down.delete('grab');
+  runScene(scene, 60);
+  assert.equal(scene.carried, null, 'releasing grab drops it');
+});
+
+test('level1 carries its logic elements through a JSON round-trip', () => {
+  const l = Level.fromJSON(JSON.parse(JSON.stringify(Level.fromJSON(LEVEL_1).toJSON())));
+  assert.ok(l.switches.length >= 2 && l.tubes.length >= 2);
+  assert.ok(l.shapes.filter((s) => s.isDoor).length >= 2, 'doors survive the round trip');
+  assert.ok(l.tubes.every((t) => t.usable));
+  assert.deepEqual(l.switches.map((s) => s.accepts).sort(), ['ball', 'box']);
 });
 
 let failed = 0;

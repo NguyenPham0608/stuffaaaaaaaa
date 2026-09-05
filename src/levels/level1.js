@@ -47,4 +47,38 @@ base.shapes.push(
   ] },
 );
 
+// ---------------------------------------------------------------------------
+// A demo of the logic elements, laid out in the empty sky above the tiled level.
+// Ride the tube up, put the crate on the box switch to raise the wall and the ball on
+// the ball switch to raise the bridge, then take the second tube back down.
+const rect = (x, y, w, h, extra = {}) => ({
+  type: 'solid', nodes: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }], ...extra,
+});
+const LEDGE = 432;               // top surface of the sky ledge
+const STAND = LEDGE - 13;        // where the player's centre sits on it
+
+base.shapes.push(
+  rect(224, 672, 130, 32),                    // walkway from the spawn ledge to the first tube
+  rect(980, LEDGE, 550, 32),                  // sky ledge, left half
+  rect(1630, LEDGE, 120, 32),                 // sky ledge, right half (the gap needs the bridge)
+  rect(1430, LEDGE - 160, 60, 160, { channel: 'a', move: { dx: 0, dy: -176, duration: 0.5 } }),
+  rect(1530, LEDGE + 88, 100, 24, { channel: 'b', move: { dx: 0, dy: -88, duration: 0.5 } }),
+);
+
+base.switches.push(
+  { x: 1140, y: LEDGE, channel: 'a', accepts: 'box' },
+  { x: 1330, y: LEDGE, channel: 'b', accepts: 'ball' },
+);
+
+base.tubes.push(
+  { radius: 26, nodes: [{ x: 330, y: 659 }, { x: 700, y: 380 }, { x: 1000, y: STAND }] },
+  { radius: 26, nodes: [{ x: 1700, y: STAND }, { x: 2050, y: 250 }, { x: 2270, y: B - 120 }] },
+);
+
+// Each sits just left of the switch it belongs on, so a rightward shove (or a carry) does it.
+base.entities.push(
+  { type: 'crate', x: 1060, y: 400 },
+  { type: 'ball', x: 1240, y: 400 },
+);
+
 export const LEVEL_1 = base;

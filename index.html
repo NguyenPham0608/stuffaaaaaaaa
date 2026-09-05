@@ -31,9 +31,32 @@
         <div class="tool-grid" id="object-grid"></div>
       </section>
 
+      <section>
+        <h2>Logic</h2>
+        <div class="row">
+          <label>Channel</label><input type="text" id="channel" value="a" list="channel-list" />
+          <datalist id="channel-list"></datalist>
+        </div>
+        <div class="row">
+          <label>Switch takes <select id="accepts">
+            <option value="any">Any</option><option value="player">Player</option>
+            <option value="box">Box</option><option value="ball">Ball</option>
+          </select></label>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="switch-latch" /> One-time</label>
+          <label>Tube r <input type="number" id="tube-radius" min="8" max="80" value="22" /></label>
+        </div>
+      </section>
+
       <section id="selection-section">
         <h2>Selection</h2>
         <div id="selection-info" class="muted">Nothing selected</div>
+        <div class="row" id="door-row" hidden>
+          <label class="check"><input type="checkbox" id="door-on" /> Door</label>
+          <label>dx <input type="number" id="door-dx" step="8" value="0" /></label>
+          <label>dy <input type="number" id="door-dy" step="8" value="-96" /></label>
+        </div>
         <div class="row">
           <button class="action small" id="sel-duplicate" title="Ctrl+D">Duplicate</button>
           <button class="action small" id="sel-straighten" title="Remove curves">Straighten</button>
@@ -73,13 +96,16 @@
       <section id="hint">
         <b>Pan</b> drag empty space (Select tool) · Wheel: zoom<br>
         <b>Draw</b> pick a material, drag on empty space<br>
-        <b>Move</b> drag a shape or object<br>
+        <b>Move</b> drag a shape, object, switch or tube<br>
         <b>Nodes</b> drag to move · right-click to delete<br>
         <b>Midpoints</b> click to add a node · drag to bend<br>
         <b>Curves</b> drag the control · right-click to straighten<br>
+        <b>Tube</b> (T) click points, Enter or right-click to finish<br>
+        <b>Switch</b> (E) powers doors on the same channel<br>
+        <b>Door</b> select a shape, tick Door, set dx/dy<br>
         Shift: no snap · V/Esc: back to Select<br>
         1-5 materials · 6-9 objects · Del · Ctrl+Z/Y<br>
-        Play mode uses this level when it has geometry.
+        In Play: hold X to carry a box or ball.
       </section>
     </div>
 

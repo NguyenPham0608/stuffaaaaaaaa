@@ -69,6 +69,22 @@ export const CONFIG = {
     pushMinFactor: 0.5,      // speed factor while pushing, playerMass/(playerMass+objectMass) floored at this
   },
 
+  // Switches, powered doors, transport tubes and the carry mechanic.
+  logic: {
+    switchReach: 16,         // px above a plate that a body must reach into to press it
+    switchSpring: 22,        // how fast a plate squashes down and springs back
+    doorDuration: 0.5,       // seconds for a powered shape to travel its full `move`
+    tubeSpeed: 520,          // px/s an object travels inside a tube
+    tubeExitSpeed: 400,      // px/s an object is launched at when it leaves a tube
+    tubeEnterSpeed: 25,      // minimum speed toward a mouth needed to be swallowed
+    tubeCooldown: 0.35,      // s after leaving a tube before it can swallow the same thing again
+    tubeExitClear: 6,        // px past the mouth a body is placed on the way out
+    carryRange: 14,          // px of reach beyond the player's radius when grabbing
+    carryGap: 1,             // px between the player and the object it carries
+    carryUpright: 0.85,      // per-step decay of a held object's rotation
+    carryThrow: 1,           // fraction of the player's velocity handed over on release
+  },
+
   camera: {
     smoothingX: 4,           // higher = snappier follow, lower = more eased
     smoothingY: 2.6,         // vertical lags a little behind horizontal so jumps don't jolt the view
@@ -84,6 +100,8 @@ export const CONFIG = {
     gridMajorColor: 'rgba(20,45,80,0.13)',
     outlineColor: '#173a5e',        // objects only; level geometry is drawn as flat fills
     outlineWidth: 2,
+    tubeWall: 'rgba(255,255,255,0.9)',
+    tubeGlass: 'rgba(255,255,255,0.16)',
     ballColor: '#ef7215',
     ballMark: 'rgba(0,0,0,0.4)',    // spin indicator so rolling reads
   },

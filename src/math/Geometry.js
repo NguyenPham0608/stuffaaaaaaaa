@@ -51,10 +51,11 @@ export function quadPoint(p0, c, p1, t, out = { x: 0, y: 0 }) {
  * set they are the quadratic control point of the segment from that node to the next.
  * Curved segments are subdivided so the polygon stays within ~`tolerance` px of the curve.
  */
-export function flattenPath(nodes, tolerance = 1.5) {
+export function flattenPath(nodes, tolerance = 1.5, closed = true) {
   const out = [];
   const n = nodes.length;
-  for (let i = 0; i < n; i++) {
+  const last = closed ? n : n - 1;
+  for (let i = 0; i < last; i++) {
     const a = nodes[i], b = nodes[(i + 1) % n];
     out.push({ x: a.x, y: a.y });
     if (a.cx == null || a.cy == null) continue;
@@ -66,6 +67,7 @@ export function flattenPath(nodes, tolerance = 1.5) {
     const segs = Math.max(4, Math.min(64, Math.ceil(Math.sqrt(dev / tolerance) * 2 + chord / 48)));
     for (let k = 1; k < segs; k++) out.push(quadPoint(a, c, b, k / segs, { x: 0, y: 0 }));
   }
+  if (!closed && n > 0) out.push({ x: nodes[n - 1].x, y: nodes[n - 1].y });
   return out;
 }
 

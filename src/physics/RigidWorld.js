@@ -43,6 +43,8 @@ export class RigidWorld {
         const b = bodies[j];
         if (a.isStatic && b.isStatic) continue;
         if ((a.proxy && b.isStatic) || (b.proxy && a.isStatic)) continue;
+        // A carried body is pinned to the player, so it must not shove the player back.
+        if ((a.proxy && b.carried) || (b.proxy && a.carried)) continue;
         if (!aabbOverlap(a.aabb, b.aabb)) continue;
         const m = collide(a, b);
         if (!m) continue;
