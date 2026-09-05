@@ -16,7 +16,9 @@ export const CONFIG = {
     gripNormalY: -0.9,       // landings on ground this flat don't convert fall speed into sideways speed
     cornerCorrection: 8,     // px of horizontal nudge allowed when clipping a ceiling corner
     oneWayTolerance: 2,      // px the ball may already be below a one-way top and still land
-    minBounceSpeed: 80,      // impact speed needed for a bouncy surface to bounce (px/s)
+    minBounceSpeed: 10,      // impact speed needed for a bouncy surface to bounce (px/s); below
+                             //   gravity's per-step nudge, so a pad relaunches you even at rest
+    minBounceLaunch: 400,    // a bouncy surface always launches at least this fast (px/s)
   },
 
   player: {
@@ -30,6 +32,7 @@ export const CONFIG = {
     airDecel: 200,
     turnBoost: 1.5,          // accel multiplier when reversing direction
     stickSpeed: 25,          // below this speed with no input on the ground, the ball comes fully to rest
+    leaveGroundSpeed: 30,    // moving away from the ground faster than this counts as airborne (px/s)
     stickMaxSlope: 0.97,     // ground normal.y magnitude above which even slippery ground counts as flat
     slideFactor: 1,          // how strongly gravity pulls the ball down slippery slopes
 
@@ -46,6 +49,7 @@ export const CONFIG = {
     jumpMinTime: 0.05,       // jump can't be cut before this much time has elapsed
     coyoteTime: 0.1,
     jumpBufferTime: 0.12,
+    bounceHoldMult: 1.5,     // bounce-pad launch multiplier while the jump key is held
 
     // One-way platforms
     dropThroughTime: 0.2,

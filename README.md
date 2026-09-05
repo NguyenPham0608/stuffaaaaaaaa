@@ -46,8 +46,9 @@ Space/middle-drag pan, wheel zoom, ▶ Playtest runs the real engine in place (E
 - Jump with variable height (release early), coyote time, jump buffering, apex hang,
   faster fall gravity, fall-speed cap.
 - Walls are inert: no wall slide, no wall jump.
-- One-way platforms (drop through; only the upward-facing side is solid), bouncy surfaces,
-  hazards (respawn).
+- One-way platforms (drop through; only the upward-facing side is solid), hazards (respawn).
+- Bounce pads launch you higher than you fell, so repeated bounces build height until the
+  fall-speed cap. Holding jump while landing on one boosts the launch further.
 - Dynamic objects: crates, heavy crates and balls are rigid bodies with rotation and friction.
   Push them (heavier ones slow you down), stack them, stand on them, knock them onto bouncy surfaces.
   Balls collide with the exact level polygon; crates collide with its convex decomposition.

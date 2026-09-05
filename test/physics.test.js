@@ -179,13 +179,52 @@ test('one-way platform: lands from above, passes from below, drops through', () 
   assert.ok(body.pos.y > 100 + 13, 'should have dropped through');
 });
 
-test('bouncy floor reflects velocity', () => {
+test('bouncy floor returns the impact speed', () => {
   const world = makeWorld([rect(0, 100, 200, 32, 'bouncy')]);
   const body = new CircleBody({ x: 100, y: 60, radius: 13 });
   body.vel.y = 600;
   for (let i = 0; i < 10; i++) world.step(body, DT);
-  assert.ok(body.vel.y < -400, `should bounce up, vy=${body.vel.y}`);
+  assert.ok(body.vel.y <= -595, `should leave about as fast as it arrived, vy=${body.vel.y}`);
   assert.ok(body.bounced === null || body.bounced.wall.type === 'bouncy');
+});
+
+test('bounce pad rebounds above the drop without running away', () => {
+  const world = makeWorld([rect(0, 600, 400, 32, 'bouncy')]);
+  const body = new CircleBody({ x: 200, y: 520, radius: 13 });   // 67px above the pad
+  const motor = new PlatformerMotor(body, CONFIG.player);
+  let highest = 0;
+  for (let i = 0; i < 2000; i++) {
+    motor.update(DT, IDLE);
+    world.step(body, DT);
+    highest = Math.max(highest, 600 - body.pos.y - body.radius);
+  }
+  assert.ok(highest > 67, `bounces above the drop height, got ${highest.toFixed(0)}`);
+  assert.ok(highest < 200, `plain bouncing stays modest, got ${highest.toFixed(0)}`);
+});
+
+test('holding jump on a bounce pad launches higher than releasing it', () => {
+  const peak = (jumpHeld) => {
+    const world = makeWorld([rect(0, 600, 400, 32, 'bouncy')]);
+    const body = new CircleBody({ x: 200, y: 520, radius: 13 });
+    const motor = new PlatformerMotor(body, CONFIG.player);
+    let highest = 0;
+    for (let i = 0; i < 2000; i++) {
+      motor.update(DT, { ...IDLE, jumpHeld });
+      world.step(body, DT);
+      highest = Math.max(highest, 600 - body.pos.y - body.radius);
+    }
+    return highest;
+  };
+  const held = peak(true), released = peak(false);
+  assert.ok(held > released * 1.2, `held ${held.toFixed(0)} should clear released ${released.toFixed(0)}`);
+});
+
+test('bouncy floor gives a gentle landing a real launch', () => {
+  const world = makeWorld([rect(0, 100, 200, 32, 'bouncy')]);
+  const body = new CircleBody({ x: 100, y: 80, radius: 13 });
+  body.vel.y = 120;
+  for (let i = 0; i < 10; i++) world.step(body, DT);
+  assert.ok(body.vel.y <= -CONFIG.physics.minBounceLaunch + 1e-6, `weak impact still launches, vy=${body.vel.y}`);
 });
 
 test('hazard contact is reported', () => {

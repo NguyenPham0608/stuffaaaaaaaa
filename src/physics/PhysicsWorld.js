@@ -43,7 +43,8 @@ export class PhysicsWorld {
 
     // 1. Pre-solve velocity constraint against sensed contacts (speculative: the body may
     //    still close whatever gap remains this step, so it settles onto curves instead of
-    //    hovering at the sensing distance).
+    //    hovering at the sensing distance). A bouncy surface launches here too, a step before
+    //    it is actually touched, so the body gets a full step to travel back out of it.
     this._sense(body);
     for (const c of body.senseContacts) this._impulse(body, c.wall, c.nx, c.ny, Math.max(0, -c.depth));
 
@@ -149,9 +150,12 @@ export class PhysicsWorld {
     if (vn >= allowed) return false;
     const bounce = s.bounce || 0;
     if (bounce > 0 && -vn > this.cfg.minBounceSpeed) {
-      vel.x -= nx * vn * (1 + bounce);
-      vel.y -= ny * vn * (1 + bounce);
-      body.bounced = { wall: s, nx, ny, speed: -vn };
+      // Leave the surface at `bounce` times the impact speed, but never below the pad's
+      // minimum launch, so even a gentle landing gets a real pop.
+      const out = Math.max(-vn * bounce, this.cfg.minBounceLaunch) * body.bounceBoost;
+      vel.x += nx * (out - vn);
+      vel.y += ny * (out - vn);
+      body.bounced = { wall: s, nx, ny, speed: -vn, launch: out };
       return true;
     }
     const dv = vn - allowed;

@@ -291,7 +291,7 @@ export function createEditor({ canvas, statusEl }) {
     camera.applyTo(ctx, dpr, 1);
     const rect = camera.visibleRect(1);
     renderer.drawGrid(ctx, rect, gridSize, 4);
-    renderer.drawBounds(ctx, level, rect);
+    renderer.drawBounds(ctx, level);
     renderer.drawShapes(ctx, level.shapes, rect);
     for (const e of level.entities) drawEntityPreview(ctx, e, CONFIG.tileSize);
     drawSpawn(ctx, level.spawn.x, level.spawn.y, CONFIG.player.radius, CONFIG.render.ballColor);

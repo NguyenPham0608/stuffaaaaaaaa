@@ -13,6 +13,8 @@ export class CircleBody {
 
     /** Timer; while > 0 the body falls through one-way platforms. */
     this.dropThrough = 0;
+    /** Multiplier applied to a bouncy surface's launch (the motor raises it while jump is held). */
+    this.bounceBoost = 1;
 
     /** Classified contacts (null or {wall, nx, ny}). Refreshed every step. */
     this.contacts = { ground: null, ceiling: null, left: null, right: null };

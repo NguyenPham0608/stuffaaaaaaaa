@@ -34,15 +34,24 @@ export class PlatformerMotor {
     const moveX = this.moveX = sign(input.moveX);
     if (moveX !== 0) this.facing = moveX;
 
+    // A contact can linger for a step after something launched the body off it (a bounce pad,
+    // or an object shoving it). Such a contact must not count as ground at all: following it
+    // would cancel the launch, and granting coyote time would let a jump replace it with a
+    // slower one. Once the body is clearly moving away along the normal, it is airborne.
+    const leaving = c.ground && (v.x * c.ground.nx + v.y * c.ground.ny) > p.leaveGroundSpeed;
+    const grounded = !!c.ground && !leaving;
+
     // ---- Timers
-    if (c.ground) this.coyote = p.coyoteTime; else this.coyote -= dt;
+    if (grounded) this.coyote = p.coyoteTime; else this.coyote -= dt;
     this.jumpBuffer = input.jumpPressed ? p.jumpBufferTime : this.jumpBuffer - dt;
     this.jumpTime += dt;
-    if (c.ground) { if (v.y >= 0) this.jumping = false; } else this.airTime += dt;
+    // Holding jump charges the next bounce; PhysicsWorld applies it when a pad launches.
+    b.bounceBoost = input.jumpHeld ? p.bounceHoldMult : 1;
+    if (grounded) { if (v.y >= 0) this.jumping = false; } else this.airTime += dt;
 
     // ---- State
     this.prevState = this.state;
-    this.state = c.ground ? MotorState.GROUND : MotorState.AIR;
+    this.state = grounded ? MotorState.GROUND : MotorState.AIR;
     if (this.state === MotorState.GROUND && this.prevState !== MotorState.GROUND) {
       this.landedSpeed = Math.max(0, b.prevPos.y < b.pos.y ? (b.pos.y - b.prevPos.y) / dt : 0);
       this.airTime = 0;
@@ -54,7 +63,7 @@ export class PlatformerMotor {
     if (b.push && b.push.dir === moveX) target *= b.push.factor;
     const control = 1;
     const groundFriction = b.groundWall?.friction ?? 1;
-    const onGround = this.state === MotorState.GROUND && !this.jumping && c.ground;
+    const onGround = grounded && !this.jumping;
     // On the ground, speed is controlled along the surface tangent so slopes don't change it.
     const along = onGround ? this._tangentSpeed(c.ground) : v.x;
     const reversing = moveX !== 0 && along !== 0 && sign(along) !== moveX;
@@ -89,17 +98,19 @@ export class PlatformerMotor {
     // ---- Jumps
     if (this.jumpBuffer > 0) {
       const groundWall = b.groundWall;
-      if (c.ground && input.down && groundWall?.oneWay) {
+      if (grounded && input.down && groundWall?.oneWay) {
         b.dropThrough = p.dropThroughTime;
         this.jumpBuffer = 0;
-      } else if (c.ground || this.coyote > 0) {
+      } else if (grounded || this.coyote > 0) {
         this._jump(-p.jumpSpeed, v.x, 'ground');
       }
     }
 
     // ---- Full rest: kill the tiny residual velocities so a resting ball never creeps.
-    // Slippery slopes are exempt so the ball slides off ice.
-    if (this.state === MotorState.GROUND && moveX === 0 && !this.jumping && v.lenSq() < p.stickSpeed * p.stickSpeed) {
+    // Slippery slopes are exempt so the ball slides off ice, and so are bouncy surfaces -
+    // zeroing there would swallow the tiny push the pad needs to launch the ball again.
+    if (grounded && moveX === 0 && !this.jumping && !c.ground.wall?.bounce
+        && v.lenSq() < p.stickSpeed * p.stickSpeed) {
       const flat = c.ground ? -c.ground.ny > p.stickMaxSlope : true;
       if (groundFriction >= 0.5 || flat) v.set(0, 0);
     }

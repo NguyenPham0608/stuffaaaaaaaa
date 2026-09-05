@@ -29,16 +29,11 @@ export class Renderer {
     ctx.stroke();
   }
 
-  /** Dim everything outside the level bounds and outline them. */
-  drawBounds(ctx, level, rect) {
-    ctx.fillStyle = 'rgba(10,30,55,0.28)';
-    ctx.beginPath();
-    ctx.rect(rect.x - 10, rect.y - 10, rect.w + 20, rect.h + 20);
-    ctx.rect(0, 0, level.width, level.height);
-    ctx.fill('evenodd');
-    ctx.strokeStyle = 'rgba(13,80,160,0.6)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([8, 6]);
+  /** Mark the level bounds with a dashed border; inside and outside share one background. */
+  drawBounds(ctx, level) {
+    ctx.strokeStyle = this.cfg.outlineColor;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 7]);
     ctx.strokeRect(0, 0, level.width, level.height);
     ctx.setLineDash([]);
   }
