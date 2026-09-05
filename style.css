@@ -68,6 +68,7 @@ button.action.small { flex: 1; text-align: center; padding: 5px 4px; }
 button.action.danger:hover { border-color: var(--danger); color: var(--danger); }
 button.action:disabled { opacity: 0.4; cursor: default; }
 button#playtest.playing { background: #4c9a6a; border-color: #6fc98d; color: #0d150f; }
+button#godmode.on { background: #b0791f; border-color: #e0a83a; color: #1a1206; }
 
 #status { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,0.6); padding: 6px 10px;
   border-radius: 6px; pointer-events: none; white-space: pre; border: 1px solid rgba(255,255,255,0.06); }

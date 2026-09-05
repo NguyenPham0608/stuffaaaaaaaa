@@ -320,6 +320,8 @@ test('level JSON round-trips including curves, and level1 loads', () => {
   assert.equal(back.shapes[0].nodes[0].cx, 50);
   assert.equal(back.entities[0].type, 'crate');
   assert.equal(back.width, 300);
+  // god mode flies the spawn point, so it has to survive the save/load Play reads through
+  assert.deepEqual(back.spawn, { x: 5, y: 6 });
   const l1 = Level.fromJSON(LEVEL_1);
   assert.ok(l1.playable && l1.shapes.length > 10 && l1.entities.length > 0);
 });

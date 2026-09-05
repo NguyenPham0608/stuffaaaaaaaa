@@ -113,6 +113,8 @@ export const CONFIG = {
     gridSize: 16,            // snap grid (px)
     handleRadius: 6,         // node handle size (screen px)
     zoomSpeed: 0.0012,       // zoom factor per wheel delta unit (exp scale)
+    godSpeed: 900,           // px/s the god-mode player flies (px/s), x2.5 while holding shift
+    godFollow: 7,            // how tightly the camera trails the god-mode player
   },
 
   debug: {

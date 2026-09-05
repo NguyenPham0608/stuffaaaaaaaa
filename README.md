@@ -45,6 +45,11 @@ The top bar switches between two modes on one page (the choice is remembered):
 5. Level bounds are in px (W/H). Snap (Shift to bypass) and grid size are in the Level panel.
    Import accepts level JSON, a `.js` with an exported JSON object, or the old ASCII tile format.
 
+**God mode** (`G`, or the button): the arrow keys fly the player around the level with no
+gravity and no collision, Shift to go faster, and the camera trails along. It moves the spawn
+point itself, so wherever you leave it is where **Play** and **Playtest** begin — handy for
+jumping straight to the part of the level you are working on.
+
 Shortcuts: Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) undo/redo, Ctrl+D duplicate, Delete, Esc,
 Space/middle-drag pan, wheel zoom, ▶ Playtest runs the real engine in place (Esc stops).
 

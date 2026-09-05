@@ -12,6 +12,9 @@ import { Switch, SWITCH_ACCEPTS } from '../world/Switch.js';
 import { Tube } from '../world/Tube.js';
 import { Checkpoint } from '../world/Checkpoint.js';
 import { quadPoint, pointInPolygon } from '../math/Geometry.js';
+import { damp } from '../math/MathUtil.js';
+
+const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
 const STORAGE_KEY = 'ballplatformer.editor.v2';
 const LEGACY_STORAGE_KEY = 'ballplatformer.editor.v1'; // tile-era ASCII levels, converted on first load
@@ -79,6 +82,9 @@ export function createEditor({ canvas, statusEl }) {
   let snap = true;
   let gridSize = CONFIG.editor.gridSize;
   let playtest = null;                   // { engine, input } while active
+  let godMode = false;                   // arrow keys fly the spawn point around, gravity-free
+  const flying = new Set();              // arrow keys currently held in god mode
+  let lastFrameTime = 0;
   let rafId = 0;
   let saveTimer = 0;
   let statusOverrideUntil = 0;
@@ -363,10 +369,13 @@ export function createEditor({ canvas, statusEl }) {
   }
 
   // ---- Render loop (editor mode only; playtest owns the canvas via Engine) ----
-  function frame() {
+  function frame(now = performance.now()) {
     rafId = requestAnimationFrame(frame);
+    const dt = lastFrameTime ? Math.min(0.05, (now - lastFrameTime) / 1000) : 0;
+    lastFrameTime = now;
     const { w, h, dpr } = fitCanvas();
     camera.setView(w, h);
+    if (godMode) flyGod(dt);
     camera.prevX = camera.x; camera.prevY = camera.y;
 
     renderer.clear(ctx);
@@ -385,8 +394,27 @@ export function createEditor({ canvas, statusEl }) {
 
     if (Date.now() > statusOverrideUntil) {
       const p = hoverWorld;
-      const tool = objectTool ? `place ${objectTool}` : mode === 'draw' ? `draw ${Materials[material].label}` : 'select / pan';
+      const tool = godMode ? `GOD · player at ${Math.round(level.spawn.x)}, ${Math.round(level.spawn.y)}`
+        : objectTool ? `place ${objectTool}` : mode === 'draw' ? `draw ${Materials[material].label}` : 'select / pan';
       statusEl.textContent = `${Math.round(p.x)}, ${Math.round(p.y)}  |  ${tool}  |  ${hoverText()}  |  zoom ${camera.zoom.toFixed(2)}x`;
+    }
+  }
+
+  /**
+   * God mode flies the spawn point itself, so wherever you park it is where Play begins.
+   * No gravity, no collision - it goes straight through the level.
+   */
+  function flyGod(dt) {
+    let dx = 0, dy = 0;
+    for (const key of flying) { const d = ARROWS[key]; dx += d[0]; dy += d[1]; }
+    if (dx || dy) {
+      const len = Math.hypot(dx, dy);
+      const speed = CONFIG.editor.godSpeed * (shiftDown ? 2.5 : 1);
+      level.spawn = { x: level.spawn.x + (dx / len) * speed * dt, y: level.spawn.y + (dy / len) * speed * dt };
+      scheduleSave();
+      // keep the flyer in view without fighting a manual pan when it is standing still
+      camera.x = damp(camera.x, level.spawn.x - camera.viewW / 2, CONFIG.editor.godFollow, dt);
+      camera.y = damp(camera.y, level.spawn.y - camera.viewH / 2, CONFIG.editor.godFollow, dt);
     }
   }
 
@@ -822,6 +850,8 @@ export function createEditor({ canvas, statusEl }) {
       if (e.code === 'Escape') stopPlaytest();
       return;
     }
+    if (godMode && ARROWS[e.key]) { flying.add(e.key); e.preventDefault(); return; }
+    if (e.key.toLowerCase() === 'g') { setGodMode(!godMode); return; }
     const mat = MATERIAL_TOOLS.find((t) => t.key === e.key);
     if (mat) { setMaterial(mat.type); return; }
     const obj = OBJECT_TOOLS.find((t) => t.key === e.key);
@@ -848,7 +878,9 @@ export function createEditor({ canvas, statusEl }) {
   window.addEventListener('keyup', (e) => {
     if (e.code === 'Space') { spaceDown = false; updateCursor(); }
     if (e.key === 'Shift') shiftDown = false;
+    flying.delete(e.key);
   }, { signal });
+  window.addEventListener('blur', () => { flying.clear(); spaceDown = shiftDown = false; }, { signal });
 
   // ---- Toolbar wiring ----
   function makeToolButtons(gridId, tools, onPick, isActive) {
@@ -1102,6 +1134,17 @@ export function createEditor({ canvas, statusEl }) {
     CONFIG.player.gravity = +gravityInput.value || CONFIG.player.gravity;
   }, { signal });
 
+  const godBtn = $('godmode');
+  on('godmode', () => setGodMode(!godMode));
+
+  function setGodMode(on) {
+    godMode = on;
+    flying.clear();
+    godBtn.classList.toggle('on', godMode);
+    godBtn.textContent = godMode ? '✦ God mode: ON (G)' : '✦ God mode (G)';
+    flashStatus(godMode ? 'God mode: arrows fly the player, shift to boost. Play starts here.' : 'God mode off');
+  }
+
   const playtestBtn = $('playtest');
   on('playtest', () => (playtest ? stopPlaytest() : startPlaytest()));
 
@@ -1109,6 +1152,7 @@ export function createEditor({ canvas, statusEl }) {
     if (!level.playable) { flashStatus('Add some geometry and a spawn first'); return; }
     cancelAnimationFrame(rafId);
     drag = null;
+    flying.clear();
     const input = new Input(window);
     const ptLevel = Level.fromJSON(level.toJSON(), { name: 'playtest' });
     const scene = new GameScene({ input, level: ptLevel, config: CONFIG });
@@ -1129,6 +1173,7 @@ export function createEditor({ canvas, statusEl }) {
     playtestBtn.textContent = '▶ Playtest';
     playtestBtn.classList.remove('playing');
     updateCursor();
+    lastFrameTime = 0;
     rafId = requestAnimationFrame(frame);
   }
 
