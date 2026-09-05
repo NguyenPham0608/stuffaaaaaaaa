@@ -58,6 +58,11 @@ Space/middle-drag pan, wheel zoom, ▶ Playtest runs the real engine in place (E
 - Run with acceleration/deceleration, turn boost, per-surface friction (ice).
 - Slopes and curves: on the ground the ball follows the surface tangent (no stair-stepping),
   climbs and descends ramps, hugs hills, and slides down slippery slopes.
+- Rounded corners: in play, every sharp *outer* corner of the geometry gets a fillet
+  (`terrain.cornerRadius`). Layered shapes are judged as one silhouette, so a corner buried in
+  another shape or sitting on its edge stays sharp and seams stay flush; inside corners and
+  gentle bends are never touched, and one-way platforms keep their full flat top. The editor
+  shows the raw shapes you drew; physics uses the same rounded geometry that is drawn.
 - Jump with variable height (release early), coyote time, jump buffering, apex hang,
   faster fall gravity, fall-speed cap.
 - Walls are inert: no wall slide, no wall jump.
