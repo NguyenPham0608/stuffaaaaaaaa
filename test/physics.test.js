@@ -11,7 +11,6 @@ import { createStaticBodies } from '../src/world/Entities.js';
 import { decomposeConvex, isConvex, flattenPath, signedArea2 } from '../src/math/Geometry.js';
 import { PlatformerMotor, MotorState } from '../src/player/PlatformerMotor.js';
 import { GameScene } from '../src/scenes/GameScene.js';
-import { roundLevelShapes } from '../src/world/Rounding.js';
 import { CONFIG } from '../src/config.js';
 import { LEVEL_1 } from '../src/levels/level1.js';
 
@@ -325,75 +324,6 @@ test('level JSON round-trips including curves, and level1 loads', () => {
   assert.deepEqual(back.spawn, { x: 5, y: 6 });
   const l1 = Level.fromJSON(LEVEL_1);
   assert.ok(l1.playable && l1.shapes.length > 10 && l1.entities.length > 0);
-});
-
-// ---------------------------------------------------------------------------
-// Corner rounding of merged geometry.
-
-const hasVertex = (s, x, y) => s.points.some((p) => Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6);
-
-test('a lone block gets every corner rounded, and stays the same size', () => {
-  const [s] = roundLevelShapes([rect(0, 0, 100, 100)], CONFIG.terrain);
-  assert.ok(s.points.length > 4);
-  for (const [x, y] of [[0, 0], [100, 0], [100, 100], [0, 100]]) assert.ok(!hasVertex(s, x, y), `corner ${x},${y} is gone`);
-  near(s.x, 0, 1e-6); near(s.y, 0, 1e-6); near(s.w, 100, 1e-6); near(s.h, 100, 1e-6);
-  // the fillet is a true quarter circle of the configured radius, centred R in from the corner
-  const R = CONFIG.terrain.cornerRadius;
-  const arc = s.points.filter((p) => p.x < R - 1e-6 && p.y < R - 1e-6);
-  assert.ok(arc.length >= 3, 'the corner became an arc');
-  for (const p of arc) near(Math.hypot(p.x - R, p.y - R), R, 1e-6);
-});
-
-test('two flush blocks read as one: seam corners stay sharp, only outer corners round', () => {
-  const [a, b] = roundLevelShapes([rect(0, 0, 100, 100), rect(100, 0, 100, 100)], CONFIG.terrain);
-  assert.ok(hasVertex(a, 100, 0) && hasVertex(a, 100, 100), 'the seam corners of A are sharp');
-  assert.ok(hasVertex(b, 100, 0) && hasVertex(b, 100, 100), 'the seam corners of B are sharp');
-  assert.ok(!hasVertex(a, 0, 0) && !hasVertex(a, 0, 100) && !hasVertex(b, 200, 0) && !hasVertex(b, 200, 100), 'outer corners round');
-});
-
-test('overlapping blocks: corners buried in the other block are not rounded', () => {
-  const [a, b] = roundLevelShapes([rect(0, 0, 120, 120), rect(100, 100, 100, 100)], CONFIG.terrain);
-  assert.ok(hasVertex(a, 120, 120), "A's corner inside B is left alone");
-  assert.ok(hasVertex(b, 100, 100), "B's corner inside A is left alone");
-  assert.ok(!hasVertex(a, 0, 0) && !hasVertex(b, 200, 200), 'the silhouette corners round');
-  const [, inner] = roundLevelShapes([rect(0, 0, 200, 200), rect(50, 50, 40, 40)], CONFIG.terrain);
-  assert.equal(inner.points.length, 4, 'a block entirely inside another is untouched');
-});
-
-test('a fillet never runs under something resting on that edge', () => {
-  // a 30px block stands on the big block's top edge, 5px in from the corner
-  const [big, small] = roundLevelShapes([rect(0, 0, 100, 100), rect(5, -50, 30, 50)], CONFIG.terrain);
-  assert.ok(hasVertex(small, 5, 0) && hasVertex(small, 35, 0), 'the feet on the seam are sharp');
-  assert.ok(!hasVertex(big, 0, 0), 'the big block corner still rounds');
-  assert.ok(hasVertex(big, 5, 0), 'but only as far as where the small block starts');
-  assert.ok(big.points.every((p) => p.y >= -1e-6), 'nothing bulges above the top edge');
-});
-
-test('concave corners, gentle bends, and one-way platforms are never rounded', () => {
-  const L = new Shape({ type: 'solid', nodes: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }, { x: 50, y: 100 }, { x: 0, y: 100 }] });
-  const [l] = roundLevelShapes([L], CONFIG.terrain);
-  assert.ok(hasVertex(l, 50, 50), 'the inside corner stays');
-  assert.ok(!hasVertex(l, 0, 0) && !hasVertex(l, 100, 0), 'outside corners round');
-  const hill = new Shape({ type: 'solid', nodes: [{ x: 0, y: 200, cx: 200, cy: 40 }, { x: 400, y: 200 }] });
-  const [h] = roundLevelShapes([hill], CONFIG.terrain);
-  const kept = hill.points.filter((p) => hasVertex(h, p.x, p.y)).length;
-  assert.ok(kept >= hill.points.length - 4, `the curve's own vertices survive (${kept}/${hill.points.length}); only its two sharp ends change`);
-  const [ow] = roundLevelShapes([rect(0, 0, 100, 16, 'oneway')], CONFIG.terrain);
-  assert.equal(ow.points.length, 4);
-});
-
-test('doors keep their motion and their flush seams after rounding', () => {
-  const door = new Shape({ type: 'solid', nodes: [{ x: 100, y: 0 }, { x: 160, y: 0 }, { x: 160, y: 100 }, { x: 100, y: 100 }], channel: 'a', move: { dx: 0, dy: -80, duration: 0.5 } });
-  const [floor, d] = roundLevelShapes([rect(0, 100, 300, 40), door], CONFIG.terrain);
-  assert.ok(d.isDoor && d.channel === 'a' && d.move.dy === -80);
-  assert.ok(hasVertex(d, 100, 100) && hasVertex(d, 160, 100), 'the bottom corners on the floor seam are sharp');
-  assert.ok(!hasVertex(d, 100, 0), 'the top corners round');
-  d.setOffset(1);
-  near(d.y, -80, 1e-6);
-  // The door's feet meet the floor mid-edge: that must not put vertices into the floor, and
-  // the floor's own far corner still rounds as usual.
-  assert.ok(!hasVertex(floor, 100, 100) && !hasVertex(floor, 160, 100));
-  assert.ok(!hasVertex(floor, 0, 100));
 });
 
 // ---------------------------------------------------------------------------

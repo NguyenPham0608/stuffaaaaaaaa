@@ -2,6 +2,7 @@ import { CONFIG } from '../config.js';
 import { Engine } from '../core/Engine.js';
 import { Input } from '../core/Input.js';
 import { Level } from '../world/Level.js';
+import { LEVEL_1 } from '../levels/level1.js';
 import { Shape } from '../world/Shape.js';
 import { Materials } from '../world/Materials.js';
 import { GameScene } from '../scenes/GameScene.js';
@@ -63,7 +64,9 @@ export function createEditor({ canvas, statusEl }) {
   const camera = new Camera(CONFIG.camera);
   camera.bounds = null;
 
-  let level = loadSaved() ?? Level.blank();
+  // With nothing saved, start from the built-in level - the one Play is showing - so it can
+  // be edited straight away instead of opening on an empty room.
+  let level = loadSaved() ?? Level.fromJSON(LEVEL_1, { name: 'LEVEL_1' });
   let material = MATERIAL_TOOLS[0].type;
   let mode = 'select';                   // 'select' (drag on empty space pans) | 'draw' (drag draws a rectangle)
   let objectTool = null;                 // null | 'spawn' | 'crate' | 'heavy' | 'ball'
@@ -1072,10 +1075,7 @@ export function createEditor({ canvas, statusEl }) {
     replaceLevel(Level.blank(w, h));
   });
 
-  on('load-level1', async () => {
-    const mod = await import('../levels/level1.js');
-    replaceLevel(Level.fromJSON(mod.LEVEL_1, { name: 'LEVEL_1' }));
-  });
+  on('load-level1', () => replaceLevel(Level.fromJSON(LEVEL_1, { name: 'LEVEL_1' })));
 
   on('import', () => $('import-file').click());
   $('import-file').addEventListener('change', async (e) => {
@@ -1178,6 +1178,7 @@ export function createEditor({ canvas, statusEl }) {
   }
 
   // ---- Boot ----
+  $('level-name').value = level.name;
   syncLevelInputs();
   refreshChannelList();
   refreshSelectionInfo();

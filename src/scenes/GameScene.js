@@ -8,7 +8,6 @@ import { DebugOverlay } from '../render/DebugOverlay.js';
 import { EventBus } from '../core/EventBus.js';
 import { createEntityBody, createStaticBodies, drawBody } from '../world/Entities.js';
 import { Shape } from '../world/Shape.js';
-import { roundLevelShapes } from '../world/Rounding.js';
 import { aabbOverlap, circleVsPolygon } from '../physics/Collision.js';
 import { damp, clamp } from '../math/MathUtil.js';
 import { pointInPolygon } from '../math/Geometry.js';
@@ -71,11 +70,8 @@ export class GameScene {
   loadLevel(level) {
     this.level = level;
     this.world.clear();
-    // The level's shapes are what the editor works on; play uses a finished copy in which
-    // layered geometry reads as one piece with only its outer corners rounded.
-    this.terrain = roundLevelShapes(level.shapes, this.config.terrain);
-    for (const s of this.terrain) this.world.addShape(s);
-    this.doors = this.terrain.filter((s) => s.isDoor);
+    for (const s of level.shapes) this.world.addShape(s);
+    this.doors = level.shapes.filter((s) => s.isDoor);
     for (const d of this.doors) this.world.updateShape(d, () => d.setOffset(0));
     // Pipe walls are solid geometry the level does not draw (drawTubes shows them instead).
     this.tubeWalls = [];
@@ -88,7 +84,7 @@ export class GameScene {
       }
     }
     // Static colliders are built once, with every door at rest so the two line up.
-    this.staticBodies = createStaticBodies([...this.terrain, ...this.tubeWalls]);
+    this.staticBodies = createStaticBodies([...level.shapes, ...this.tubeWalls]);
     this.doorBodies = new Map(this.doors.map((d) => [d, this.staticBodies.filter((b) => b.source === d)]));
     this.camera.bounds = { x: 0, y: 0, w: level.width, h: level.height };
     // Checkpoints outlive a death, so they are only cleared when a level is loaded.
@@ -538,7 +534,7 @@ export class GameScene {
     this.camera.applyTo(ctx, view.dpr, alpha);
     const rect = this.camera.visibleRect(alpha);
     this.renderer.drawGrid(ctx, rect);
-    this.renderer.drawShapes(ctx, this.terrain, rect);
+    this.renderer.drawShapes(ctx, this.level.shapes, rect);
     this.renderer.drawSwitches(ctx, this.level.switches, rect);
     this.renderer.drawCheckpoints(ctx, this.level.checkpoints, rect, this.checkpoint);
     for (const o of this.objects) if (!o.travelling) drawBody(ctx, o, alpha);

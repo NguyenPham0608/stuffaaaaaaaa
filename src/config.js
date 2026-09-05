@@ -88,12 +88,6 @@ export const CONFIG = {
     carrySettleIters: 4,     // passes pushing a held object (and the player) out of walls
   },
 
-  // How level geometry is finished for play (see world/Rounding.js).
-  terrain: {
-    cornerRadius: 12,        // fillet on the outer corners of the merged geometry (px); 0 disables
-    cornerMinAngle: 8,       // bends gentler than this (degrees) are left alone, so curves stay curves
-  },
-
   camera: {
     smoothingX: 4,           // higher = snappier follow, lower = more eased
     smoothingY: 2.6,         // vertical lags a little behind horizontal so jumps don't jolt the view
