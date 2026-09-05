@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ball Platformer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="modebar">
+    <span class="brand">Ball Platformer</span>
+    <button class="mode" data-mode="play">Play</button>
+    <button class="mode" data-mode="editor">Editor</button>
+    <span id="modehelp"></span>
+  </div>
+
+  <div id="main">
+    <div id="sidebar" hidden>
+      <section>
+        <h2>Tool</h2>
+        <button class="tool-btn" id="tool-select"><span class="swatch" style="background:#7dd3fc"></span>Select / Pan<span class="key">V</span></button>
+      </section>
+
+      <section>
+        <h2>Draw</h2>
+        <div class="tool-grid" id="material-grid"></div>
+      </section>
+
+      <section>
+        <h2>Objects</h2>
+        <div class="tool-grid" id="object-grid"></div>
+      </section>
+
+      <section id="selection-section">
+        <h2>Selection</h2>
+        <div id="selection-info" class="muted">Nothing selected</div>
+        <div class="row">
+          <button class="action small" id="sel-duplicate" title="Ctrl+D">Duplicate</button>
+          <button class="action small" id="sel-straighten" title="Remove curves">Straighten</button>
+          <button class="action small danger" id="sel-delete" title="Delete">Delete</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Level</h2>
+        <div class="row"><input type="text" id="level-name" value="LEVEL_CUSTOM" /></div>
+        <div class="row">
+          <label>W <input type="number" id="level-w" min="128" max="20000" step="16" /></label>
+          <label>H <input type="number" id="level-h" min="128" max="20000" step="16" /></label>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="snap" checked /> Snap</label>
+          <label>grid <input type="number" id="grid-size" min="1" max="256" value="16" /></label>
+        </div>
+        <button class="action" id="new">New (blank + border)</button>
+        <button class="action" id="load-level1">Load level1</button>
+        <button class="action" id="import">Import .json / .js / .txt&hellip;</button>
+        <input type="file" id="import-file" accept=".json,.js,.txt" />
+        <button class="action" id="export">Export .json (download)</button>
+        <button class="action" id="copy">Copy JSON</button>
+        <div class="row">
+          <button class="action small" id="undo" title="Ctrl+Z">Undo</button>
+          <button class="action small" id="redo" title="Ctrl+Shift+Z">Redo</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Playtest</h2>
+        <button class="action" id="playtest">&#9654; Playtest</button>
+        <div class="row"><label>Gravity <input type="number" id="pt-gravity" step="50" /></label></div>
+      </section>
+
+      <section id="hint">
+        <b>Pan</b> drag empty space (Select tool) · Wheel: zoom<br>
+        <b>Draw</b> pick a material, drag on empty space<br>
+        <b>Move</b> drag a shape or object<br>
+        <b>Nodes</b> drag to move · right-click to delete<br>
+        <b>Midpoints</b> click to add a node · drag to bend<br>
+        <b>Curves</b> drag the control · right-click to straighten<br>
+        Shift: no snap · V/Esc: back to Select<br>
+        1-5 materials · 6-9 objects · Del · Ctrl+Z/Y<br>
+        Play mode uses this level when it has geometry.
+      </section>
+    </div>
+
+    <div id="canvas-wrap">
+      <canvas id="game"></canvas>
+      <div id="status" hidden></div>
+    </div>
+  </div>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
