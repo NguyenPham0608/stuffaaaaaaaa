@@ -1,87 +1,113 @@
-import { Level } from '../world/Level.js';
-
-// The sample level starts life as tiles (legend: # solid, ~ ice, B bouncy, - one-way,
-// ^ hazard, P spawn, c crate, h heavy crate, o ball) and gets a few free-form slopes
-// and curves added on top. Levels made in the editor are plain JSON like `LEVEL_1`.
-const TILES = `
-############################################################################
-#                                                                          #
-#                                                                          #
-#                                  ##                                      #
-#                                  ##          ####                        #
-#                    ####          ##                       ####           #
-#   P         o                    ##      c                               #
-#  ####      ---     ####          ##      ##                              #
-#                                  ##                   ~~~~~~   ##        #
-#          ##        ####          ##   ---        ##                      #
-#                                  ##                         #  #   ##    #
-#  ~~~~~~        ##  ####          ##  ##      co             #  #         #
-#                                  ##         ####            #  #    ###  #
-#                    ####     ###  ##                         #  #         #
-#          ####                    ##               ###       #  #         #
-#                     ---          ##       ##                #  #  ##     #
-#   ##  c                          ##                 BB     c#  #         #
-#     cc   BBB   ###  o^^^^^  ^^^^^##^^^^    hc    ^^^^^^^^^  #  #       ###
-############################################################################
-`;
-
-// Headroom above the tiled layout, so the camera has somewhere to scroll vertically.
-const SKY_ROWS = 14;
-const rows = TILES.replace(/^\n+|\n+$/g, '').split('\n');
-const sky = '#' + ' '.repeat(rows[0].length - 2) + '#';
-const base = Level.fromAscii([rows[0], ...Array(SKY_ROWS).fill(sky), ...rows.slice(1)],
-  { tileSize: 32, name: 'LEVEL_1' }).toJSON();
-
-// The free-form pieces sit on the floor, so they are placed relative to the level's bottom.
-const B = base.height;
-base.shapes.push(
-  // ramp up to the ledge left of the spawn pit
-  { type: 'solid', nodes: [{ x: 32, y: B }, { x: 128, y: B - 64 }, { x: 128, y: B }] },
-  // rolling hill on the right
-  { type: 'solid', nodes: [
-    { x: 2112, y: B, cx: 2150, cy: B - 88 }, { x: 2224, y: B - 80, cx: 2300, cy: B - 80 }, { x: 2336, y: B },
-  ] },
-  // icy half-pipe
-  { type: 'ice', nodes: [
-    { x: 1328, y: B }, { x: 1328, y: B - 108, cx: 1360, cy: B }, { x: 1440, y: B },
-  ] },
-);
-
-// ---------------------------------------------------------------------------
-// A demo of the logic elements, laid out in the empty sky above the tiled level.
-// Ride the tube up, put the crate on the box switch to raise the wall and the ball on
-// the ball switch to raise the bridge, then take the second tube back down.
-const rect = (x, y, w, h, extra = {}) => ({
-  type: 'solid', nodes: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }], ...extra,
-});
-const LEDGE = 432;               // top surface of the sky ledge
-const STAND = LEDGE - 13;        // where the player's centre sits on it
-
-base.shapes.push(
-  rect(224, 672, 130, 32),                    // walkway from the spawn ledge to the first tube
-  rect(980, LEDGE, 550, 32),                  // sky ledge, left half
-  rect(1630, LEDGE, 120, 32),                 // sky ledge, right half (the gap needs the bridge)
-  rect(1430, LEDGE - 160, 60, 160, { channel: 'a', move: { dx: 0, dy: -176, duration: 0.5 } }),
-  rect(1530, LEDGE + 88, 100, 24, { channel: 'b', move: { dx: 0, dy: -88, duration: 0.5 } }),
-);
-
-// One at the start of the sky section, so failing the puzzle does not send you all the way back.
-base.checkpoints.push({ x: 1030, y: LEDGE });
-
-base.switches.push(
-  { x: 1140, y: LEDGE, channel: 'a', accepts: 'box' },
-  { x: 1330, y: LEDGE, channel: 'b', accepts: 'ball' },
-);
-
-base.tubes.push(
-  { radius: 26, nodes: [{ x: 330, y: 659 }, { x: 700, y: 380 }, { x: 1000, y: STAND }] },
-  { radius: 26, nodes: [{ x: 1700, y: STAND }, { x: 2050, y: 250 }, { x: 2270, y: B - 120 }] },
-);
-
-// Each sits just left of the switch it belongs on, so a rightward shove (or a carry) does it.
-base.entities.push(
-  { type: 'crate', x: 1060, y: 400 },
-  { type: 'ball', x: 1240, y: 400 },
-);
-
-export const LEVEL_1 = base;
+// The built-in level, exported from the editor. "Load level1" brings it back in for
+// editing; Export .json writes this shape out again.
+export const LEVEL_1 = {
+  name: 'LEVEL_1',
+  width: 1600,
+  height: 1024,
+  spawn: {x: 98, y: 821},
+  shapes: [
+    { type: 'solid', nodes: [{x: 0, y: 992}, {x: 3424, y: 992}, {x: 3424, y: 1024}, {x: 0, y: 1024}] },
+    { type: 'solid', nodes: [{x: -768, y: 32}, {x: 32, y: 32}, {x: 32, y: 1024}, {x: -768, y: 1024}] },
+    { type: 'solid', nodes: [{x: 1568, y: 32}, {x: 1600, y: 32}, {x: 1600, y: 832}, {x: 1568, y: 832}] },
+    { type: 'solid', nodes: [{x: 1568, y: 832}, {x: 1600, y: 832}, {x: 1600, y: 992, cx: 1600, cy: 992}, {x: 1568, y: 992}], channel: 'a', move: { dx: 0, dy: -300, duration: 0.5 } },
+    { type: 'solid', nodes: [{x: 528, y: 928}, {x: 800, y: 752}, {x: 800, y: 992}, {x: 448, y: 992}] },
+    { type: 'solid', nodes: [{x: 800, y: 752}, {x: 1072, y: 864}, {x: 1104, y: 1008}, {x: 800, y: 1008}] },
+    { type: 'solid', nodes: [{x: 2048, y: 256}, {x: 2080, y: 256}, {x: 2080, y: 896}, {x: 2048, y: 896}] },
+    { type: 'solid', nodes: [{x: 2144, y: 256}, {x: 2176, y: 256}, {x: 2176, y: 896}, {x: 2144, y: 896}] },
+    { type: 'solid', nodes: [{x: 2048, y: 224}, {x: 2176, y: 224}, {x: 2176, y: 256}, {x: 2048, y: 256}] },
+    { type: 'solid', nodes: [{x: 2080, y: 864}, {x: 2144, y: 864}, {x: 2144, y: 896}, {x: 2080, y: 896}], channel: 'b', move: { dx: 32, dy: 0, duration: 0.5 } },
+    { type: 'solid', nodes: [{x: 2432, y: 640}, {x: 2624, y: 640}, {x: 2624, y: 992}, {x: 2432, y: 992}] },
+    { type: 'solid', nodes: [{x: 2176, y: 800}, {x: 2256, y: 800}, {x: 2256, y: 832}, {x: 2176, y: 832}] },
+    { type: 'solid', nodes: [{x: 2368, y: 896}, {x: 2432, y: 896}, {x: 2432, y: 928}, {x: 2368, y: 928}] },
+    { type: 'solid', nodes: [{x: 2368, y: 672}, {x: 2432, y: 672}, {x: 2432, y: 704}, {x: 2368, y: 704}] },
+    { type: 'solid', nodes: [{x: 2624, y: 960}, {x: 3424, y: 960}, {x: 3424, y: 992}, {x: 2624, y: 992}], channel: 'c', move: { dx: 0, dy: -320, duration: 0.5 } },
+    { type: 'hazard', nodes: [{x: 2624, y: 688}, {x: 3424, y: 688}, {x: 3424, y: 992}, {x: 2624, y: 992}] },
+    { type: 'solid', nodes: [{x: 3424, y: 640}, {x: 3456, y: 640}, {x: 3456, y: 1024}, {x: 3424, y: 1024}] },
+    { type: 'solid', nodes: [{x: 3648, y: 608}, {x: 3824, y: 608}, {x: 3824, y: 640}, {x: 3648, y: 640}] },
+    { type: 'solid', nodes: [{x: 3968, y: 496}, {x: 4128, y: 496}, {x: 4128, y: 528}, {x: 3968, y: 528}] },
+    { type: 'solid', nodes: [{x: 3520, y: 304}, {x: 3712, y: 304}, {x: 3712, y: 336}, {x: 3520, y: 336}] },
+    { type: 'ice', nodes: [{x: 3776, y: 352}, {x: 3904, y: 352}, {x: 3904, y: 384}, {x: 3776, y: 384}] },
+    { type: 'solid', nodes: [{x: 3776, y: 160}, {x: 3904, y: 160}, {x: 3904, y: 192}, {x: 3776, y: 192}] },
+    { type: 'hazard', nodes: [{x: 4048, y: 176}, {x: 4432, y: 176}, {x: 4432, y: 192}, {x: 4048, y: 192}] },
+    { type: 'solid', nodes: [{x: 3904, y: 160}, {x: 4048, y: 160}, {x: 4048, y: 192}, {x: 3904, y: 192}] },
+    { type: 'solid', nodes: [{x: 4432, y: 160}, {x: 4608, y: 160}, {x: 4608, y: 192}, {x: 4432, y: 192}] },
+    { type: 'solid', nodes: [{x: 5248, y: 16}, {x: 5328, y: 16}, {x: 5328, y: 32}, {x: 5248, y: 32}] },
+    { type: 'solid', nodes: [{x: 5392, y: 16}, {x: 5744, y: 16}, {x: 5744, y: 32}, {x: 5392, y: 32}] },
+    { type: 'solid', nodes: [{x: 3456, y: 992}, {x: 4384, y: 992}, {x: 4384, y: 1024}, {x: 3456, y: 1024}] },
+    { type: 'bouncy', nodes: [{x: 3456, y: 976}, {x: 4384, y: 976}, {x: 4384, y: 992}, {x: 3456, y: 992}] },
+    { type: 'solid', nodes: [{x: 4608, y: 128}, {x: 4672, y: 128}, {x: 4672, y: 192}, {x: 4608, y: 192}] },
+    { type: 'solid', nodes: [{x: 4608, y: -336}, {x: 4672, y: -336}, {x: 4672, y: 64}, {x: 4608, y: 64}] },
+    { type: 'solid', nodes: [{x: 5600, y: -448}, {x: 5632, y: -448}, {x: 5632, y: 16}, {x: 5600, y: 16}], channel: 'a', move: { dx: 0, dy: -464, duration: 0.5 } },
+    { type: 'hazard', nodes: [{x: 5744, y: 48}, {x: 6704, y: 48}, {x: 6704, y: 64}, {x: 5744, y: 64}] },
+    { type: 'solid', nodes: [{x: 5728, y: 32}, {x: 5744, y: 32}, {x: 5744, y: 64}, {x: 5728, y: 64}] },
+    { type: 'solid', nodes: [{x: 5728, y: 64}, {x: 6704, y: 64}, {x: 6704, y: 80}, {x: 5728, y: 80}] },
+    { type: 'solid', nodes: [{x: 6704, y: 32}, {x: 6720, y: 32}, {x: 6720, y: 80}, {x: 6704, y: 80}] },
+    { type: 'solid', nodes: [{x: 6720, y: 32}, {x: 7184, y: 32}, {x: 7184, y: 80}, {x: 6720, y: 80}] },
+    { type: 'solid', nodes: [{x: 5744, y: -544}, {x: 6704, y: -544}, {x: 6704, y: -512}, {x: 5744, y: -512}], channel: 'l', move: { dx: 992, dy: 0, duration: 0.5 } },
+  ],
+  entities: [
+    { type: 'crate', x: 192, y: 928 },
+    { type: 'crate', x: 1856, y: 944 },
+    { type: 'crate', x: 1920, y: 944 },
+    { type: 'crate', x: 1984, y: 944 },
+    { type: 'ball', x: 2096, y: 848 },
+    { type: 'crate', x: 3856, y: 144 },
+    { type: 'crate', x: 3888, y: 144 },
+    { type: 'crate', x: 3920, y: 144 },
+    { type: 'crate', x: 3952, y: 144 },
+    { type: 'crate', x: 3984, y: 144 },
+    { type: 'crate', x: 4528, y: 144 },
+    { type: 'crate', x: 4576, y: 144 },
+    { type: 'crate', x: 4496, y: 144 },
+    { type: 'crate', x: 3952, y: 112 },
+    { type: 'crate', x: 3904, y: 112 },
+    { type: 'crate', x: 4016, y: 144 },
+    { type: 'crate', x: 4000, y: 112 },
+    { type: 'crate', x: 4544, y: 112 },
+    { type: 'crate', x: 4496, y: 112 },
+    { type: 'crate', x: 5760, y: -560 },
+    { type: 'crate', x: 5792, y: -560 },
+    { type: 'crate', x: 5824, y: -560 },
+    { type: 'crate', x: 5856, y: -560 },
+    { type: 'crate', x: 5888, y: -560 },
+    { type: 'crate', x: 5920, y: -560 },
+    { type: 'crate', x: 5952, y: -560 },
+    { type: 'crate', x: 5984, y: -560 },
+    { type: 'crate', x: 6016, y: -560 },
+    { type: 'crate', x: 6048, y: -560 },
+    { type: 'crate', x: 6080, y: -560 },
+    { type: 'crate', x: 6112, y: -560 },
+    { type: 'crate', x: 6144, y: -560 },
+    { type: 'crate', x: 6176, y: -560 },
+    { type: 'crate', x: 6208, y: -560 },
+    { type: 'crate', x: 6240, y: -560 },
+    { type: 'crate', x: 6272, y: -560 },
+    { type: 'crate', x: 6304, y: -560 },
+    { type: 'crate', x: 6336, y: -560 },
+    { type: 'crate', x: 6400, y: -560 },
+    { type: 'crate', x: 6432, y: -560 },
+    { type: 'crate', x: 6464, y: -560 },
+    { type: 'crate', x: 6656, y: -560 },
+    { type: 'crate', x: 6496, y: -560 },
+    { type: 'crate', x: 6592, y: -560 },
+    { type: 'crate', x: 6624, y: -560 },
+    { type: 'crate', x: 6560, y: -560 },
+    { type: 'crate', x: 6368, y: -560 },
+    { type: 'crate', x: 6528, y: -560 },
+    { type: 'crate', x: 6688, y: -560 },
+  ],
+  switches: [
+    { x: 1232, y: 992, w: 48, h: 10, channel: 'a', accepts: 'any' },
+    { x: 1776, y: 992, w: 48, h: 10, channel: 'b', accepts: 'box' },
+    { x: 2528, y: 640, w: 48, h: 10, channel: 'c', accepts: 'ball', latch: true },
+    { x: 5456, y: 16, w: 48, h: 10, channel: 'a', accepts: 'box', latch: true },
+    { x: 5696, y: 16, w: 48, h: 10, channel: 'l', accepts: 'any' },
+  ],
+  tubes: [
+    { radius: 22, wall: 7, nodes: [{x: 4624, y: 96}, {x: 5024, y: 96}, {x: 5024, y: -16}, {x: 5216, y: -16}, {x: 5216, y: 192}, {x: 4864, y: 192}, {x: 4864, y: 272}, {x: 5360, y: 272}, {x: 5360, y: 16}] },
+  ],
+  checkpoints: [
+    { x: 3440, y: 640, w: 16, h: 46 },
+    { x: 4448, y: 160, w: 16, h: 46 },
+  ],
+};

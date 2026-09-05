@@ -109,6 +109,9 @@ the next. Shapes may be concave; winding doesn't matter. `Level.fromAscii` still
 old tile format (`#` solid, `~` ice, `B` bouncy, `-` one-way, `^` hazard, `P` spawn,
 `c`/`h`/`o` crate / heavy crate / ball).
 
+`src/levels/level1.js` is exactly this format. To change the built-in level: edit it in the
+editor, **Export .json**, and paste the contents in (or load the file back with **Import**).
+
 ## Layout
 
 ```
@@ -138,7 +141,7 @@ src/render/Camera.js         smooth follow, bounds clamp
 src/render/Renderer.js       shape / grid / bounds drawing (material styles)
 src/render/DebugOverlay.js   diagnostics
 src/scenes/GameScene.js      composes everything
-src/levels/level1.js         sample level (tiles converted + a few slopes and curves)
+src/levels/level1.js         the built-in level, in the same JSON shape the editor exports
 src/editor/Editor.js         vector editor: draw/move shapes, nodes, curves, objects, undo/redo, import/export, playtest
 test/physics.test.js         node tests: `node test/physics.test.js`
 ```

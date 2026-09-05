@@ -539,12 +539,18 @@ test('holding grab carries an object, swaps sides on turning, and releases it', 
   assert.equal(scene.carried, null, 'releasing grab drops it');
 });
 
-test('level1 carries its logic elements through a JSON round-trip', () => {
-  const l = Level.fromJSON(JSON.parse(JSON.stringify(Level.fromJSON(LEVEL_1).toJSON())));
-  assert.ok(l.switches.length >= 2 && l.tubes.length >= 2);
-  assert.ok(l.shapes.filter((s) => s.isDoor).length >= 2, 'doors survive the round trip');
-  assert.ok(l.tubes.every((t) => t.usable));
-  assert.deepEqual(l.switches.map((s) => s.accepts).sort(), ['ball', 'box']);
+test('level1 is playable and survives a JSON round-trip unchanged', () => {
+  const a = Level.fromJSON(LEVEL_1);
+  assert.ok(a.playable, 'the built-in level must be playable');
+  assert.ok(a.tubes.every((t) => t.usable), 'every tube has a usable path');
+  assert.ok(a.shapes.every((s) => s.points.length >= 3), 'every shape flattens to a polygon');
+  // Doors must rest at offset 0 so their colliders are built in the right place.
+  assert.ok(a.shapes.filter((s) => s.isDoor).every((s) => s.offset === 0));
+
+  // Re-exporting and re-importing has to produce the identical level, since that is the
+  // path the editor and localStorage both take.
+  const b = Level.fromJSON(JSON.parse(JSON.stringify(a.toJSON())));
+  assert.deepEqual(b.toJSON(), a.toJSON());
 });
 
 let failed = 0;
