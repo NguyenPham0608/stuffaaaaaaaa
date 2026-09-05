@@ -46,6 +46,7 @@ export class GameScene {
     this.carried = null;     // the rigid body stuck to the player's front, if any
     this.carrySide = 1;      // which side of the player it is held on
     this.tubeCooldown = 0;   // blocks the player being re-swallowed right after an exit
+    this.checkpoint = null;  // the flag the player respawns at, once one has been touched
     this.powered = new Set();
     this.deaths = 0;
     this.engine = null;
@@ -78,6 +79,9 @@ export class GameScene {
     this.staticBodies = createStaticBodies([...level.shapes, ...this.tubeWalls]);
     this.doorBodies = new Map(this.doors.map((d) => [d, this.staticBodies.filter((b) => b.source === d)]));
     this.camera.bounds = { x: 0, y: 0, w: level.width, h: level.height };
+    // Checkpoints outlive a death, so they are only cleared when a level is loaded.
+    this.checkpoint = null;
+    for (const c of level.checkpoints) c.reset();
     this.respawn();
     this.events.emit('level:loaded', { level });
   }
@@ -111,8 +115,14 @@ export class GameScene {
     }
   }
 
+  /** Where the player comes back: the last checkpoint touched, else the level's spawn. */
+  get respawnPoint() {
+    return this.checkpoint ? this.checkpoint.spawnPoint(this.config.player.radius) : this.level.spawn;
+  }
+
   respawn() {
-    this.ball.respawn(this.level.spawn.x, this.level.spawn.y);
+    const at = this.respawnPoint;
+    this.ball.respawn(at.x, at.y);
     this.resetObjects();
     this._syncProxy();
     this.camera.snapTo(this.ball.pos.x, this.ball.pos.y);
@@ -133,6 +143,7 @@ export class GameScene {
 
     this._updateSwitches(dt);
     this._updateDoors(dt);
+    this._updateCheckpoints(dt);
 
     const riding = this.riders.some((r) => r.kind === 'player');
     if (!riding) this.ball.update(dt, Ball.readInput(input), this.world);
@@ -185,6 +196,21 @@ export class GameScene {
       if (d.offset === target) continue;
       const next = target > d.offset ? Math.min(target, d.offset + step) : Math.max(target, d.offset - step);
       this._setDoor(d, next);
+    }
+  }
+
+  _updateCheckpoints(dt) {
+    const b = this.ball.body;
+    const box = { x: b.pos.x - b.radius, y: b.pos.y - b.radius, w: b.radius * 2, h: b.radius * 2 };
+    for (const c of this.level.checkpoints) {
+      // Touching any flag makes it the current one, so walking back to an earlier one re-arms it.
+      if (c !== this.checkpoint && aabbOverlap(c.rect, box)) {
+        const first = !c.reached;
+        c.reached = true;
+        this.checkpoint = c;
+        if (first) this.events.emit('player:checkpoint', { checkpoint: c });
+      }
+      c.raise = damp(c.raise, c.reached ? 1 : 0, this.config.logic.checkpointSpring, dt);
     }
   }
 
@@ -382,6 +408,7 @@ export class GameScene {
     this.renderer.drawGrid(ctx, rect);
     this.renderer.drawShapes(ctx, this.level.shapes, rect);
     this.renderer.drawSwitches(ctx, this.level.switches, rect);
+    this.renderer.drawCheckpoints(ctx, this.level.checkpoints, rect, this.checkpoint);
     for (const o of this.objects) if (!o.travelling) drawBody(ctx, o, alpha);
     this.ball.render(ctx, alpha);
     this.renderer.drawTubes(ctx, this.level.tubes, rect, (c) => {

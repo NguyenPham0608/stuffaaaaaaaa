@@ -73,6 +73,7 @@ export const CONFIG = {
   logic: {
     switchReach: 16,         // px above a plate that a body must reach into to press it
     switchSpring: 22,        // how fast a plate squashes down and springs back
+    checkpointSpring: 12,    // how fast a checkpoint flag runs up its pole
     doorDuration: 0.5,       // seconds for a powered shape to travel its full `move`
     tubeSpeed: 520,          // px/s an object travels inside a tube
     tubeExitSpeed: 400,      // px/s an object is launched at when it leaves a tube
@@ -100,6 +101,8 @@ export const CONFIG = {
     gridMajorColor: 'rgba(20,45,80,0.13)',
     outlineColor: '#173a5e',        // objects only; level geometry is drawn as flat fills
     outlineWidth: 2,
+    checkpointOn: '#ef7215',
+    checkpointOff: 'rgba(255,255,255,0.8)',
     tubeWall: 'rgba(255,255,255,0.9)',
     tubeGlass: 'rgba(255,255,255,0.16)',
     ballColor: '#ef7215',

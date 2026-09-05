@@ -10,6 +10,7 @@ import { Camera } from '../render/Camera.js';
 import { ENTITY_DEFS, drawEntityPreview, drawSpawn } from '../world/Entities.js';
 import { Switch, SWITCH_ACCEPTS } from '../world/Switch.js';
 import { Tube } from '../world/Tube.js';
+import { Checkpoint } from '../world/Checkpoint.js';
 import { quadPoint, pointInPolygon } from '../math/Geometry.js';
 
 const STORAGE_KEY = 'ballplatformer.editor.v2';
@@ -25,6 +26,7 @@ export const OBJECT_TOOLS = [
   { type: 'ball',  label: 'Ball',  color: ENTITY_DEFS.ball.color,  key: '9' },
   { type: 'switch', label: 'Switch', color: '#ffffff', key: 'e' },
   { type: 'tube',   label: 'Tube',   color: '#cfefff', key: 't' },
+  { type: 'checkpoint', label: 'Checkpoint', color: CONFIG.render.checkpointOn, key: 'c' },
 ];
 
 /** Read the editor's saved level (plain JSON) without starting the editor. */
@@ -111,7 +113,7 @@ export function createEditor({ canvas, statusEl }) {
 
   function snapshot() { level.name = $('level-name').value; return JSON.stringify(level.toJSON()); }
 
-  const SEL_FIELD = { shape: 'shape', entity: 'entity', switch: 'sw', tube: 'tube' };
+  const SEL_FIELD = { shape: 'shape', entity: 'entity', switch: 'sw', tube: 'tube', checkpoint: 'cp' };
 
   function restore(json) {
     const kind = selected?.kind;
@@ -121,7 +123,7 @@ export function createEditor({ canvas, statusEl }) {
     $('level-name').value = level.name;
     selected = null;
     if (kind && keep >= 0) {
-      const list = { shape: level.shapes, entity: level.entities, switch: level.switches, tube: level.tubes }[kind];
+      const list = { shape: level.shapes, entity: level.entities, switch: level.switches, tube: level.tubes, checkpoint: level.checkpoints }[kind];
       if (list?.[keep]) selected = { kind, [SEL_FIELD[kind]]: list[keep] };
     }
     syncLevelInputs();
@@ -272,9 +274,14 @@ export function createEditor({ canvas, statusEl }) {
       for (let i = 0; i < segCount(path); i++) if (dist(w, midpoint(path, i)) <= hr) return { kind: 'mid', ...ref, path, index: i };
     }
     if (dist(w, level.spawn) <= CONFIG.player.radius + 2 / camera.zoom) return { kind: 'spawn' };
+    const inBox = (r, pad = 0) => w.x >= r.x - pad && w.x <= r.x + r.w + pad && w.y >= r.y - pad && w.y <= r.y + r.h + pad;
     for (let i = level.switches.length - 1; i >= 0; i--) {
-      const s = level.switches[i], r = s.rect;
-      if (w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y - 4 && w.y <= r.y + r.h + 2) return { kind: 'switch', sw: s };
+      const s = level.switches[i];
+      if (inBox(s.rect, 4)) return { kind: 'switch', sw: s };
+    }
+    for (let i = level.checkpoints.length - 1; i >= 0; i--) {
+      const c = level.checkpoints[i];
+      if (inBox(c.rect, 4)) return { kind: 'checkpoint', cp: c };
     }
     for (let i = level.entities.length - 1; i >= 0; i--) {
       const e = level.entities[i];
@@ -304,6 +311,7 @@ export function createEditor({ canvas, statusEl }) {
       case 'entity': return [level.entities, sel.entity];
       case 'switch': return [level.switches, sel.sw];
       case 'tube': return [level.tubes, sel.tube];
+      case 'checkpoint': return [level.checkpoints, sel.cp];
       default: return [null, null];
     }
   }
@@ -333,6 +341,10 @@ export function createEditor({ canvas, statusEl }) {
       const s = new Switch({ ...selected.sw.toJSON(), x: selected.sw.x + off, y: selected.sw.y + off });
       level.switches.push(s);
       selected = { kind: 'switch', sw: s };
+    } else if (selected.kind === 'checkpoint') {
+      const c = new Checkpoint({ ...selected.cp.toJSON(), x: selected.cp.x + off, y: selected.cp.y + off });
+      level.checkpoints.push(c);
+      selected = { kind: 'checkpoint', cp: c };
     } else {
       const e = { ...selected.entity, x: selected.entity.x + off, y: selected.entity.y + off };
       level.entities.push(e);
@@ -364,6 +376,7 @@ export function createEditor({ canvas, statusEl }) {
     renderer.drawBounds(ctx, level);
     renderer.drawShapes(ctx, level.shapes, rect);
     renderer.drawSwitches(ctx, level.switches, rect);
+    renderer.drawCheckpoints(ctx, level.checkpoints, rect);
     for (const e of level.entities) drawEntityPreview(ctx, e, CONFIG.tileSize);
     drawSpawn(ctx, level.spawn.x, level.spawn.y, CONFIG.player.radius, CONFIG.render.ballColor);
     renderer.drawTubes(ctx, level.tubes, rect);
@@ -388,6 +401,7 @@ export function createEditor({ canvas, statusEl }) {
       case 'shape': return `${Materials[h.shape.type].label}${h.shape.isDoor ? ` door "${h.shape.channel}"` : ' shape'} (${h.shape.nodes.length} nodes)`;
       case 'entity': return ENTITY_DEFS[h.entity.type].label;
       case 'switch': return `switch "${h.sw.channel}" · ${SWITCH_ACCEPTS[h.sw.accepts].label}${h.sw.latch ? ' · one-time' : ''}`;
+      case 'checkpoint': return 'checkpoint';
       case 'tube': return `tube (${h.tube.nodes.length} nodes, ${Math.round(h.tube.length)}px)`;
       case 'spawn': return 'spawn';
       default: return '';
@@ -445,8 +459,8 @@ export function createEditor({ canvas, statusEl }) {
       ctx.setLineDash([]);
     }
 
-    if (selected?.kind === 'switch') {
-      const r = selected.sw.rect;
+    if (selected?.kind === 'switch' || selected?.kind === 'checkpoint') {
+      const r = (selected.sw ?? selected.cp).rect;
       ctx.setLineDash([4 / z, 3 / z]);
       ctx.strokeStyle = '#0b63c5';
       ctx.lineWidth = 1.5 / z;
@@ -560,6 +574,8 @@ export function createEditor({ canvas, statusEl }) {
         ctx.fillStyle = sw.color;
         ctx.beginPath(); ctx.roundRect(sw.rect.x, sw.rect.y, sw.rect.w, sw.rect.h, 3); ctx.fill();
         ctx.lineWidth = 2 / z; ctx.strokeStyle = CONFIG.render.outlineColor; ctx.stroke();
+      } else if (objectTool === 'checkpoint') {
+        renderer.drawCheckpoints(ctx, [new Checkpoint({ x: p.x, y: p.y })], camera.visibleRect(1));
       } else if (objectTool === 'tube') {
         if (!pendingTube) {
           ctx.lineWidth = 3 / z; ctx.strokeStyle = '#ffffff';
@@ -602,6 +618,10 @@ export function createEditor({ canvas, statusEl }) {
         level.switches.push(sw);
         select({ kind: 'switch', sw });
         refreshChannelList();
+      } else if (objectTool === 'checkpoint') {
+        const cp = new Checkpoint({ x: p.x, y: p.y });
+        level.checkpoints.push(cp);
+        select({ kind: 'checkpoint', cp });
       } else {
         const ent = { type: objectTool, x: p.x, y: p.y };
         level.entities.push(ent);
@@ -639,7 +659,12 @@ export function createEditor({ canvas, statusEl }) {
       case 'switch':
         select({ kind: 'switch', sw: hit.sw });
         pushUndo();
-        drag = { kind: 'switch', sw: hit.sw, origin: w, start: { x: hit.sw.x, y: hit.sw.y } };
+        drag = { kind: 'point', item: hit.sw, origin: w, start: { x: hit.sw.x, y: hit.sw.y } };
+        break;
+      case 'checkpoint':
+        select({ kind: 'checkpoint', cp: hit.cp });
+        pushUndo();
+        drag = { kind: 'point', item: hit.cp, origin: w, start: { x: hit.cp.x, y: hit.cp.y } };
         break;
       case 'entity':
         select({ kind: 'entity', entity: hit.entity });
@@ -667,6 +692,7 @@ export function createEditor({ canvas, statusEl }) {
       case 'ctrl': pushUndo(); hit.path.nodes[hit.index].cx = hit.path.nodes[hit.index].cy = null; rebuildPath(hit.path); break;
       case 'mid': pushUndo(); insertNode(hit.path, hit.index); break;
       case 'switch': pushUndo(); drop(level.switches, hit.sw); break;
+      case 'checkpoint': pushUndo(); drop(level.checkpoints, hit.cp); break;
       case 'entity': pushUndo(); drop(level.entities, hit.entity); break;
       case 'tube': pushUndo(); drop(level.tubes, hit.tube); break;
       case 'shape': pushUndo(); drop(level.shapes, hit.shape); break;
@@ -713,9 +739,9 @@ export function createEditor({ canvas, statusEl }) {
         if (d.moved) bendSegment(d.path, d.index, p);
         break;
       case 'spawn': level.spawn = { x: p.x, y: p.y }; break;
-      case 'switch': {
+      case 'point': {
         const t = snapPoint({ x: d.start.x + (w.x - d.origin.x), y: d.start.y + (w.y - d.origin.y) });
-        d.sw.x = t.x; d.sw.y = t.y;
+        d.item.x = t.x; d.item.y = t.y;
         break;
       }
       case 'entity': {
@@ -783,7 +809,7 @@ export function createEditor({ canvas, statusEl }) {
     if (objectTool) { canvas.style.cursor = 'copy'; return; }
     const k = hoverHit?.kind;
     canvas.style.cursor = k === 'node' || k === 'ctrl' || k === 'mid' ? 'pointer'
-      : k === 'shape' || k === 'entity' || k === 'spawn' || k === 'switch' || k === 'tube' ? 'move'
+      : k === 'shape' || k === 'entity' || k === 'spawn' || k === 'switch' || k === 'tube' || k === 'checkpoint' ? 'move'
       : mode === 'draw' ? 'crosshair' : 'grab';
   }
 
@@ -915,6 +941,9 @@ export function createEditor({ canvas, statusEl }) {
         info.textContent = `Tube · ${t.nodes.length} nodes · ${Math.round(t.length)}px · r${t.radius}`;
         break;
       }
+      case 'checkpoint':
+        info.textContent = `Checkpoint at ${Math.round(selected.cp.x)}, ${Math.round(selected.cp.y)}`;
+        break;
       default: {
         const e = selected.entity;
         info.textContent = `${ENTITY_DEFS[e.type].label} at ${Math.round(e.x)}, ${Math.round(e.y)}`;

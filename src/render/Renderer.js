@@ -103,6 +103,39 @@ export class Renderer {
     }
   }
 
+  /** Checkpoint flags: the flag runs up the pole once reached, and the active one is filled. */
+  drawCheckpoints(ctx, checkpoints, rect, current = null) {
+    for (const c of checkpoints) {
+      const r = c.rect;
+      if (!aabbOverlap(r, rect)) continue;
+      const top = c.y - c.h;
+
+      ctx.fillStyle = this.cfg.outlineColor;
+      ctx.beginPath();
+      ctx.roundRect(c.x - 8, c.y - 3, 16, 3, 1.5);
+      ctx.fill();
+      ctx.strokeStyle = this.cfg.outlineColor;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y - 2); ctx.lineTo(c.x, top);
+      ctx.stroke();
+
+      const fh = 13;
+      const fy = top + (1 - c.raise) * (c.h - fh - 6);   // slides up the pole when reached
+      ctx.beginPath();
+      ctx.moveTo(c.x, fy);
+      ctx.lineTo(c.x + c.w, fy + fh / 2);
+      ctx.lineTo(c.x, fy + fh);
+      ctx.closePath();
+      ctx.fillStyle = c === current ? this.cfg.checkpointOn : this.cfg.checkpointOff;
+      ctx.fill();
+      ctx.lineWidth = this.cfg.outlineWidth;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+  }
+
   /**
    * Clear tubes. `drawInside` is invoked between the tube's glass and its rim so whatever is
    * being transported is drawn within the tube walls.

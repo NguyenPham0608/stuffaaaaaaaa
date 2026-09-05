@@ -65,6 +65,9 @@ base.shapes.push(
   rect(1530, LEDGE + 88, 100, 24, { channel: 'b', move: { dx: 0, dy: -88, duration: 0.5 } }),
 );
 
+// One at the start of the sky section, so failing the puzzle does not send you all the way back.
+base.checkpoints.push({ x: 1030, y: LEDGE });
+
 base.switches.push(
   { x: 1140, y: LEDGE, channel: 'a', accepts: 'box' },
   { x: 1330, y: LEDGE, channel: 'b', accepts: 'ball' },

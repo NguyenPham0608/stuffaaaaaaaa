@@ -1,6 +1,7 @@
 import { Shape } from './Shape.js';
 import { Switch } from './Switch.js';
 import { Tube } from './Tube.js';
+import { Checkpoint } from './Checkpoint.js';
 
 /** Character -> material (or special marker) used by Level.fromAscii. */
 export const DEFAULT_LEGEND = {
@@ -23,7 +24,7 @@ export const ENTITY_TYPES = new Set(['crate', 'heavy', 'ball']);
  * The canonical format is JSON (see toJSON); fromAscii converts the old tile format.
  */
 export class Level {
-  constructor({ shapes = [], entities = [], switches = [], tubes = [], spawn = { x: 64, y: 64 }, width = 1600, height = 576, name = 'level' } = {}) {
+  constructor({ shapes = [], entities = [], switches = [], tubes = [], checkpoints = [], spawn = { x: 64, y: 64 }, width = 1600, height = 576, name = 'level' } = {}) {
     this.shapes = shapes;
     /** Dynamic objects: {type, x, y} with x/y the centre in px. */
     this.entities = entities;
@@ -31,6 +32,8 @@ export class Level {
     this.switches = switches;
     /** Transport tubes. */
     this.tubes = tubes;
+    /** Flags the player respawns at once touched. */
+    this.checkpoints = checkpoints;
     this.spawn = { x: spawn.x, y: spawn.y };
     this.width = width;
     this.height = height;
@@ -47,6 +50,7 @@ export class Level {
       entities: this.entities.map((e) => ({ type: e.type, x: e.x, y: e.y })),
       switches: this.switches.map((s) => s.toJSON()),
       tubes: this.tubes.map((t) => t.toJSON()),
+      checkpoints: this.checkpoints.map((c) => c.toJSON()),
     };
   }
 
@@ -61,8 +65,10 @@ export class Level {
       .map((e) => ({ type: e.type, x: +e.x, y: +e.y }));
     const switches = (data.switches || []).map((s) => new Switch(s));
     const tubes = (data.tubes || []).filter((t) => t && Array.isArray(t.nodes) && t.nodes.length >= 2).map((t) => new Tube(t));
+    const checkpoints = (data.checkpoints || [])
+      .filter((c) => c && Number.isFinite(+c.x) && Number.isFinite(+c.y)).map((c) => new Checkpoint(c));
     return new Level({
-      shapes, entities, switches, tubes,
+      shapes, entities, switches, tubes, checkpoints,
       spawn: data.spawn || { x: 64, y: 64 },
       width: +data.width || 1600,
       height: +data.height || 576,

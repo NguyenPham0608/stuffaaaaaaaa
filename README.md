@@ -40,6 +40,8 @@ The top bar switches between two modes on one page (the choice is remembered):
    that far whenever any switch on its channel is pressed. A dashed arrow previews the motion.
 7. **Tube** (T): click points to lay a tube, Enter or right-click to finish. Select it afterwards
    to drag nodes and bend segments like any shape; `Tube r` sets its radius.
+8. **Checkpoint** (C): click to plant a flag on the ground. Touching it in play makes it the
+   respawn point.
 5. Level bounds are in px (W/H). Snap (Shift to bypass) and grid size are in the Level panel.
    Import accepts level JSON, a `.js` with an exported JSON object, or the old ASCII tile format.
 
@@ -67,6 +69,9 @@ Space/middle-drag pan, wheel zoom, ▶ Playtest runs the real engine in place (E
   many as you like. A switch can accept anything, or only the player, only boxes (crate / heavy
   crate), or only balls. A **one-time** switch latches on first press and stays on until the
   level resets; it is drawn with an inset line so you can spot it before stepping on it.
+- **Checkpoints** are flags. Touching one raises it and makes it where you come back after a
+  hazard or a fall; walking back to an earlier flag re-arms that one. Raised flags survive
+  dying — only loading a level clears them — while objects, switches and doors reset each time.
 - **Tubes** are clear pipes of any shape, solid everywhere but their two mouths — you can stand
   on one and it blocks you from the side. Anything entering a mouth with enough speed is drawn
   along the centreline — visibly travelling inside the glass — and launched out the far end.
@@ -120,6 +125,7 @@ src/player/Ball.js           body + motor + rolling visuals
 src/world/Materials.js       registry of surface materials
 src/world/Shape.js           editable closed path -> flattened polygon + edges, plus door motion
 src/world/Switch.js          pressure plate: channel + what it accepts
+src/world/Checkpoint.js      flag the player respawns at once touched
 src/world/Tube.js            open path with a radius -> transport centreline
 src/world/Level.js           level data (JSON in/out) + ASCII converter
 src/world/Entities.js        crate/ball definitions -> rigid bodies, shapes -> static terrain + convex pieces, drawing

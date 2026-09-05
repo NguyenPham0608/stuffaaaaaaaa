@@ -368,6 +368,38 @@ test('a switch powers a door on its channel, and releases it again', () => {
   near(d.y, 440, 1e-6);
 });
 
+test('checkpoints become the respawn point and survive dying', () => {
+  const hazard = { type: 'hazard', nodes: [{ x: 900, y: 600 }, { x: 1100, y: 600 }, { x: 1100, y: 640 }, { x: 900, y: 640 }] };
+  const { scene, input } = makeScene({
+    width: 1200, shapes: [FLOOR, hazard],
+    checkpoints: [{ x: 400, y: 600 }, { x: 700, y: 600 }],
+    spawn: { x: 80, y: 587 },
+  });
+  const [c1, c2] = scene.level.checkpoints;
+  near(scene.respawnPoint.x, 80, 1e-6);
+
+  input.down.add('right');
+  runScene(scene, 200);
+  assert.ok(c1.reached && scene.checkpoint === c1, 'first flag taken');
+  near(scene.respawnPoint.x, 400, 1e-6);
+  near(scene.respawnPoint.y, 600 - CONFIG.player.radius - 1, 1e-6);
+
+  runScene(scene, 200);
+  assert.ok(c2.reached && scene.checkpoint === c2, 'second flag takes over');
+
+  const deaths = scene.deaths;
+  runScene(scene, 300);
+  assert.ok(scene.deaths > deaths, 'ran into the hazard');
+  assert.ok(scene.ball.pos.x > 600, `respawned at the flag, not the spawn: x=${scene.ball.pos.x}`);
+  assert.ok(c1.reached && c2.reached, 'flags stay raised through a death');
+
+  // Loading a level clears them again.
+  scene.loadLevel(scene.level);
+  assert.equal(scene.checkpoint, null);
+  assert.equal(c2.reached, false);
+  near(scene.respawnPoint.x, 80, 1e-6);
+});
+
 test('a one-time switch stays pressed after whatever triggered it leaves', () => {
   const door = {
     type: 'solid', nodes: [{ x: 600, y: 440 }, { x: 660, y: 440 }, { x: 660, y: 600 }, { x: 600, y: 600 }],
