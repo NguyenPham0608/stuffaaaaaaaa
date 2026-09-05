@@ -43,8 +43,10 @@ export class RigidWorld {
         const b = bodies[j];
         if (a.isStatic && b.isStatic) continue;
         if ((a.proxy && b.isStatic) || (b.proxy && a.isStatic)) continue;
-        // A carried body is pinned to the player, so it must not shove the player back.
+        // A carried body is pinned to the player, so it must not shove the player back, and
+        // GameScene settles it against the level itself (both sides here would be immovable).
         if ((a.proxy && b.carried) || (b.proxy && a.carried)) continue;
+        if ((a.carried && b.isStatic) || (b.carried && a.isStatic)) continue;
         if (!aabbOverlap(a.aabb, b.aabb)) continue;
         const m = collide(a, b);
         if (!m) continue;
@@ -55,7 +57,7 @@ export class RigidWorld {
     const ld = Math.max(0, 1 - this.linearDamping * dt);
     const ad = Math.max(0, 1 - this.angularDamping * dt);
     for (const b of bodies) {
-      if (b.isStatic || b.proxy) continue;
+      if (b.isStatic || b.proxy || b.carried) continue;
       b.vel.y += this.gravity * dt;
       b.vel.scale(ld);
       b.angVel *= ad;
@@ -66,7 +68,7 @@ export class RigidWorld {
 
     const maxSq = this.maxSpeed * this.maxSpeed;
     for (const b of bodies) {
-      if (b.isStatic || b.proxy) continue;
+      if (b.isStatic || b.proxy || b.carried) continue;   // carried: position is written by GameScene
       const sq = b.vel.lenSq();
       if (sq > maxSq) b.vel.scale(this.maxSpeed / Math.sqrt(sq));
       b.pos.addScaled(b.vel, dt);

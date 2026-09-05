@@ -82,8 +82,10 @@ export const CONFIG = {
     tubeExitClear: 6,        // px past the mouth a body is placed on the way out
     carryRange: 14,          // px of reach beyond the player's radius when grabbing
     carryGap: 1,             // px between the player and the object it carries
-    carryUpright: 0.85,      // per-step decay of a held object's rotation
+    carryAttach: 0.1,        // s a freshly grabbed object takes to slide onto the hold point
+    carryUpright: 18,        // rate a held object levels out to the nearest quarter turn
     carryThrow: 1,           // fraction of the player's velocity handed over on release
+    carrySettleIters: 4,     // passes pushing a held object (and the player) out of walls
   },
 
   camera: {

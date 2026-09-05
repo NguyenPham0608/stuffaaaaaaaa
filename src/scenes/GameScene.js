@@ -8,8 +8,11 @@ import { DebugOverlay } from '../render/DebugOverlay.js';
 import { EventBus } from '../core/EventBus.js';
 import { createEntityBody, createStaticBodies, drawBody } from '../world/Entities.js';
 import { Shape } from '../world/Shape.js';
-import { aabbOverlap } from '../physics/Collision.js';
-import { damp } from '../math/MathUtil.js';
+import { aabbOverlap, circleVsPolygon } from '../physics/Collision.js';
+import { damp, clamp } from '../math/MathUtil.js';
+import { pointInPolygon } from '../math/Geometry.js';
+
+const BOX_CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 
 /**
  * Wires level + physics + player + camera together.
@@ -45,6 +48,11 @@ export class GameScene {
     this.riders = [];        // {kind, body|null, tube, dir, dist} - things travelling inside a tube
     this.carried = null;     // the rigid body stuck to the player's front, if any
     this.carrySide = 1;      // which side of the player it is held on
+    this.carryAge = 0;       // seconds since the grab, for the attach ease-in
+    this.carryBlocked = false; // after a forced drop, grab must be released before it re-arms
+    this._carryHits = [];
+    this._carryQuery = [];
+    this._carryPushes = new Map();
     this.tubeCooldown = 0;   // blocks the player being re-swallowed right after an exit
     this.checkpoint = null;  // the flag the player respawns at, once one has been touched
     this.powered = new Set();
@@ -92,6 +100,7 @@ export class GameScene {
     r.clear();
     this.riders.length = 0;
     this.carried = null;
+    this.carryBlocked = false;
     this.tubeCooldown = 0;
     this.powered.clear();
     for (const s of this.level.switches) s.reset();
@@ -149,7 +158,7 @@ export class GameScene {
     if (!riding) this.ball.update(dt, Ball.readInput(input), this.world);
     this._stepObjects(dt);
     // Placed once the player's position for this step is final, so it never lags behind.
-    this._updateCarry(input.isDown('grab'));
+    this._updateCarry(input.isDown('grab'), dt);
     this._updateTubes(dt);
 
     const b = this.ball.body;
@@ -232,17 +241,25 @@ export class GameScene {
   _drop(throwIt) {
     if (!this.carried) return;
     const o = this.carried;
+    const b = this.ball.body, k = throwIt ? this.config.logic.carryThrow : 0;
     this._hold(o, false);
-    if (throwIt) o.vel.x += this.ball.body.vel.x * this.config.logic.carryThrow;
+    o.vel.set(b.vel.x * k, b.vel.y * k);
     this.carried = null;
   }
 
-  _updateCarry(held) {
+  /**
+   * Holding grab pins an object to the player's side. The attachment is kinematic: the hold
+   * point is written outright every step (no spring, no lag), and the object is then settled
+   * against the level - floors lift it, walls and ceilings stop the player - so it can neither
+   * jitter nor pass through anything. If it cannot fit at all, it is let go.
+   */
+  _updateCarry(held, dt) {
     const lg = this.config.logic;
     const b = this.ball.body;
-    if (!held) { this._drop(true); return; }
+    if (!held) { this.carryBlocked = false; this._drop(true); return; }
     if (this.carried && (this.carried.travelling || !this.objects.includes(this.carried))) this._drop(false);
     if (!this.carried) {
+      if (this.carryBlocked) return;
       // Grab the nearest object within reach, preferring whatever is ahead of the player.
       const reach = b.radius + lg.carryRange;
       let best = null, bestScore = Infinity;
@@ -258,21 +275,132 @@ export class GameScene {
       if (!best) return;
       this.carried = best;
       this.carrySide = Math.sign(best.pos.x - b.pos.x) || this.ball.motor.facing || 1;
+      this.carryAge = 0;
+      // Walls are checked against a circle: the object's true radius for balls, the half-width
+      // for crates (which are kept upright, so that is exact on axis-aligned geometry).
+      best.carryRadius = best.shape === 'circle' ? best.radius : Math.max(...best.verts.map((v) => Math.abs(v.x)));
       this._hold(best, true);
       this.events.emit('player:grab', { body: best });
     }
-    // Locked to the player's side: the position is written outright every step, so it never
-    // lags, swings or drifts. It still shoves other objects, and carries the player's velocity
-    // so releasing it throws it.
+
     const o = this.carried;
+    this.carryAge += dt;
     this.carrySide = this.ball.motor.facing || this.carrySide;
-    const tx = b.pos.x + this.carrySide * (b.radius + o.radius + lg.carryGap);
+    // Bottoms aligned, so a held object rests level with the player's feet rather than one
+    // pixel into the floor (which would otherwise be "corrected" every single step).
+    const hx = b.pos.x + this.carrySide * (b.radius + o.carryRadius + lg.carryGap);
+    const hy = b.pos.y + (b.radius - o.carryRadius);
     o.prevPos.copy(o.pos);
-    o.pos.set(tx, b.pos.y);
+    if (this.carryAge < lg.carryAttach) {
+      // Slide onto the hold point over a few frames instead of popping there.
+      const k = 1 - Math.exp(-dt * 30);
+      o.pos.set(o.pos.x + (hx - o.pos.x) * k, o.pos.y + (hy - o.pos.y) * k);
+    } else {
+      o.pos.set(hx, hy);
+    }
     o.vel.set(b.vel.x, b.vel.y);
     o.angVel = 0;
-    o.angle *= lg.carryUpright;   // settle upright while held
+    const quarter = Math.PI / 2;
+    o.angle = damp(o.angle, Math.round(o.angle / quarter) * quarter, lg.carryUpright, dt);
     o.updateTransform();
+
+    const px = b.pos.x, py = b.pos.y, pvx = b.vel.x, pvy = b.vel.y;
+    if (!this._settleCarried(o, true)) {
+      // Wedged - a gap the pair does not fit through. The player was fine before the settle
+      // started shoving it, so give that position back; then free the object on its own as
+      // far as it will go and let go of it there. It stays beside the player: parking it on
+      // the player instead hands the solver a body-deep overlap with the proxy, which fires the
+      // object straight through the floor.
+      b.pos.set(px, py); b.vel.set(pvx, pvy);
+      this._settleCarried(o, false);
+      this._drop(false);
+      this.carryBlocked = true;   // or the very next step would grab it straight back
+    }
+    o.updateTransform();
+  }
+
+  /**
+   * Push a held object out of the level. A floor-ish contact only lifts the object (it rides
+   * up bumps and slopes ahead of the player); anything else moves the player with it too
+   * (when `movePlayer`) and cancels the player's velocity into it, so a wall stops you and a
+   * ceiling ends a jump. Boxes are tested both as a circle (catches thin obstacles between
+   * corners) and corner-by-corner (exact on slopes and diagonals, where a circle under-reads).
+   * Returns false if it could not be resolved.
+   */
+  _settleCarried(o, movePlayer) {
+    const b = this.ball.body;
+    const r = o.carryRadius;
+    const skin = this.config.physics.skin;
+    const hits = this._carryHits;
+    // The way out of a solid is the way that faces the player, who stands in free space. That
+    // has to be the player's position *before* this settle starts moving it: chasing the live
+    // position lets a ceiling push the player under the object's feet, at which point the floor
+    // below reads as "behind" and a sunk object is declared settled.
+    const ax = b.pos.x, ay = b.pos.y;
+    for (let iter = 0; iter < this.config.logic.carrySettleIters; iter++) {
+      hits.length = 0;
+      const q = r + skin + 1;
+      const list = this.world.hash.query(o.pos.x - q, o.pos.y - q, q * 2, q * 2, this._carryQuery);
+      for (const s of list) {
+        if (s.oneWay) continue;
+        // Sensed with a skin, like the player is, so a face the object is merely touching still
+        // pins the player's velocity - otherwise it re-accelerates into it every step.
+        const from = hits.length;
+        circleVsPolygon(o.pos.x, o.pos.y, r + skin, s, hits);
+        for (let i = from; i < hits.length; i++) hits[i].depth -= skin;
+        if (o.shape !== 'circle') this._boxCornerHits(o, r, s, ax, ay, hits);
+      }
+      // A box face can raise several hits against one shape (the circle plus both corners).
+      // Applying each in full would push out of the same face two or three times over, and
+      // that overshoot is what launches a squeezed object through the floor - so keep only
+      // the deepest hit per shape and direction, the way a contact manifold would.
+      const pushes = this._carryPushes;
+      pushes.clear();
+      for (const c of hits) {
+        if (c.nx * (ax - c.x) + c.ny * (ay - c.y) < 0) continue;
+        const key = c.shape.id * 64 + (Math.round(c.nx * 3) + 4) * 8 + (Math.round(c.ny * 3) + 4);
+        const prev = pushes.get(key);
+        if (!prev || c.depth > prev.depth) pushes.set(key, c);
+      }
+      let any = false;
+      for (const c of pushes.values()) {
+        const floor = c.ny <= this.config.physics.groundNormalY;
+        if (c.depth > 0.1) {
+          any = true;
+          o.pos.x += c.nx * c.depth;
+          o.pos.y += c.ny * c.depth;
+          if (movePlayer && !floor) { b.pos.x += c.nx * c.depth; b.pos.y += c.ny * c.depth; }
+        }
+        if (movePlayer && !floor && c.depth > -skin) {
+          const vn = b.vel.x * c.nx + b.vel.y * c.ny;
+          if (vn < 0) { b.vel.x -= c.nx * vn; b.vel.y -= c.ny * vn; }
+        }
+      }
+      if (!any) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A corner of an upright box that is inside `s` gets pushed out through the nearest edge
+   * that faces the player at (ax, ay). Merely-nearest is wrong in the thin foot of a ramp,
+   * where the closest edge is the ramp's underside buried in the floor: rejecting it after the
+   * fact would leave the corner with no exit at all while a circle test reads "touching".
+   */
+  _boxCornerHits(o, r, s, ax, ay, out) {
+    for (const [sx, sy] of BOX_CORNERS) {
+      const px = o.pos.x + sx * r, py = o.pos.y + sy * r;
+      if (px < s.x || px > s.right || py < s.y || py > s.bottom) continue;
+      if (!pointInPolygon(px, py, s.points)) continue;
+      let best = null, bd = Infinity;
+      for (const e of s.edges) {
+        if (e.nx * (ax - px) + e.ny * (ay - py) < 0) continue;
+        const t = clamp(((px - e.ax) * (e.bx - e.ax) + (py - e.ay) * (e.by - e.ay)) / (e.len * e.len), 0, 1);
+        const d = Math.hypot(px - (e.ax + (e.bx - e.ax) * t), py - (e.ay + (e.by - e.ay) * t));
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (best) out.push({ x: px, y: py, nx: best.nx, ny: best.ny, depth: bd + 0.01, vertex: false, shape: s });
+    }
   }
 
   // ---- Tubes ----

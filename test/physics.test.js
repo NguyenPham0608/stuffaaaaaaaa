@@ -512,6 +512,48 @@ test('a tube is solid except at its mouths', () => {
   near(scene.ball.pos.x, 500 - 26 - 7 - scene.ball.body.radius, 1.5);
 });
 
+test('a carried crate is stopped by a wall and stops the player with it', () => {
+  const wall = { type: 'solid', nodes: [{ x: 600, y: 300 }, { x: 660, y: 300 }, { x: 660, y: 600 }, { x: 600, y: 600 }] };
+  const { scene, input } = makeScene({ shapes: [FLOOR, wall], entities: [{ type: 'crate', x: 180, y: 560 }] });
+  const crate = scene.objects[0];
+  runScene(scene, 60);
+  input.down.add('grab');
+  input.down.add('right');
+  let worstFace = -Infinity;
+  for (let i = 0; i < 500; i++) {
+    scene.update(DT);
+    if (scene.carried === crate) worstFace = Math.max(worstFace, crate.pos.x + crate.carryRadius);
+  }
+  assert.equal(scene.carried, crate, 'still holding it');
+  assert.ok(worstFace <= 600 + 0.05, `the crate's face never enters the wall, worst ${worstFace}`);
+  // crate face on the wall -> crate centre one half-width back -> player one hold offset behind that
+  const hold = scene.ball.body.radius + crate.carryRadius + CONFIG.logic.carryGap;
+  near(scene.ball.pos.x, 600 - crate.carryRadius - hold, 0.1);
+  assert.ok(Math.abs(scene.ball.vel.x) < 1, `player is held still against it, vx ${scene.ball.vel.x}`);
+  assert.equal(scene.deaths, 0);
+});
+
+test('a crate that cannot fit is let go safely', () => {
+  // A 25px-high tunnel: the player (26 tall, 1px to spare) is already inside, next to a 28px
+  // crate jammed between roof and floor. Grabbing it cannot make it fit, so it must be
+  // released - without shoving the player into the floor, and without the crate being fired
+  // through it. (It starts beside the player, on the floor: that is where a grab finds it.)
+  const roof = { type: 'solid', nodes: [{ x: 600, y: 300 }, { x: 900, y: 300 }, { x: 900, y: 575 }, { x: 600, y: 575 }] };
+  const { scene, input } = makeScene({ shapes: [FLOOR, roof], entities: [{ type: 'crate', x: 728, y: 586 }], spawn: { x: 700, y: 587 } });
+  const crate = scene.objects[0];
+  input.down.add('grab');
+  runScene(scene, 300);
+  assert.equal(scene.carried, null, 'gave the crate up');
+  assert.equal(scene.deaths, 0, 'the player survived');
+  near(scene.ball.pos.y, 587, 1, 'the player is still standing in the tunnel');
+  assert.ok(crate.pos.y + crate.carryRadius <= 600 + 4, `the crate stays on the floor, not through it: y=${crate.pos.y}`);
+  // Grab is latched off after a forced drop until it is released, so it does not re-grab every step.
+  assert.equal(scene.carryBlocked, true);
+  input.down.delete('grab');
+  runScene(scene, 1);
+  assert.equal(scene.carryBlocked, false);
+});
+
 test('holding grab carries an object, swaps sides on turning, and releases it', () => {
   const { scene, input } = makeScene({ entities: [{ type: 'crate', x: 200, y: 560 }] });
   const crate = scene.objects[0];
@@ -523,9 +565,10 @@ test('holding grab carries an object, swaps sides on turning, and releases it', 
   runScene(scene, 120);
   assert.equal(scene.carried, crate, 'running into it while holding grab picks it up');
   // Locked flush to the player's side, not sprung: the offset is exact and never drifts.
-  const expected = scene.ball.body.radius + crate.radius + CONFIG.logic.carryGap;
+  // Crates hang by their half-width (they are held upright) with bottoms aligned to the player's.
+  const expected = scene.ball.body.radius + crate.carryRadius + CONFIG.logic.carryGap;
   near(crate.pos.x - scene.ball.pos.x, expected, 1e-6);
-  near(crate.pos.y, scene.ball.pos.y, 1e-6);
+  near(crate.pos.y - scene.ball.pos.y, scene.ball.body.radius - crate.carryRadius, 1e-6);
   runScene(scene, 60);
   near(crate.pos.x - scene.ball.pos.x, expected, 1e-6);
 

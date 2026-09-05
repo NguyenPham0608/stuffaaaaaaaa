@@ -81,9 +81,11 @@ Space/middle-drag pan, wheel zoom, ▶ Playtest runs the real engine in place (E
   on one and it blocks you from the side. Anything entering a mouth with enough speed is drawn
   along the centreline — visibly travelling inside the glass — and launched out the far end.
 - **Carrying**: hold `X` and run into a crate or ball to pin it to your side. It is held rigidly
-  (its position is written every step, so it never lags or swings), stays on whichever side you
-  face, shoves other objects, and is thrown with your momentum when you let go. Because it is
-  driven rather than simulated, a held object can overlap level geometry.
+  (its position is written every step, so it never lags or swings), sits level with your feet,
+  stays on whichever side you face, shoves other objects, and is thrown with your momentum when
+  you let go. It is solid against the level: a wall or ceiling it meets stops you too, it rides
+  up slopes and bumps ahead of you, and if you are somewhere it simply cannot fit it is let go
+  (release `X` to grab again).
 - Rolling ball visuals with landing squash aligned to the surface; render interpolation on a
   fixed 120 Hz step.
 
